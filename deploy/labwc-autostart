@@ -1,0 +1,4 @@
+#!/bin/sh
+# labwc session autostart (installed to ~/.config/labwc/autostart).
+# Launches the 944S HVAC dashboard kiosk once the desktop session starts.
+/home/mark/hvac/deploy/kiosk-launch.sh &
