@@ -193,6 +193,7 @@ export default function HVACDashboard() {
   const [passengerSeatHeat, setPassengerSeatHeat] = useState(0);
   const [mixTemp, setMixTemp] = useState(68.4);
   const [extTemp, setExtTemp] = useState(47);
+  const [interiorTemp, setInteriorTemp] = useState(72);
   const [mixFlap, setMixFlap] = useState(35);
   const [defrostFlap, setDefrostFlap] = useState(0);
   const [footFlap, setFootFlap] = useState(0);
@@ -229,6 +230,7 @@ export default function HVACDashboard() {
           if (s.vent_mode !== undefined) setVentMode(s.vent_mode);
           if (s.mix_chamber_temp_f !== undefined) setMixTemp(s.mix_chamber_temp_f);
           if (s.exterior_temp_f !== undefined) setExtTemp(s.exterior_temp_f);
+          if (s.interior_temp_f !== undefined) setInteriorTemp(s.interior_temp_f);
           if (s.mix_flap_pos !== undefined) setMixFlap(s.mix_flap_pos);
           if (s.defrost_flap_pos !== undefined) setDefrostFlap(s.defrost_flap_pos);
           if (s.footwell_flap_pos !== undefined) setFootFlap(s.footwell_flap_pos);
@@ -405,14 +407,16 @@ export default function HVACDashboard() {
             justifyContent: "space-evenly", gap: 10 }}>
             {[
               { label: "OUTSIDE", val: extTemp, min: -20, max: 120, color: C.vfd },
+              { label: "INTERIOR", val: interiorTemp, min: 20, max: 140,
+                color: interiorTemp > 82 ? C.amber : interiorTemp < 62 ? C.ice : C.vfd },
               { label: "DUCT", val: mixTemp, min: 32, max: 180, color: mixTemp > 100 ? C.amber : C.vfd },
             ].map((t) => (
-              <div key={t.label} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div key={t.label} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
                   <span style={labelStyle}>{t.label}</span>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
                     <span style={{
-                      fontFamily: "'Orbitron',monospace", fontSize: 80, fontWeight: 700, lineHeight: 0.95,
+                      fontFamily: "'Orbitron',monospace", fontSize: 66, fontWeight: 700, lineHeight: 0.95,
                       color: t.color, textShadow: `0 0 16px ${t.color}70, 0 0 44px ${t.color}25`,
                       fontVariantNumeric: "tabular-nums",
                     }}>{Math.round(t.val)}</span>
@@ -420,7 +424,7 @@ export default function HVACDashboard() {
                       color: C.mid }}>°F</span>
                   </div>
                 </div>
-                <Segs value={((t.val - t.min) / (t.max - t.min)) * 100} n={26} color={t.color} h={13} />
+                <Segs value={((t.val - t.min) / (t.max - t.min)) * 100} n={26} color={t.color} h={12} />
               </div>
             ))}
           </div>

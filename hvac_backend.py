@@ -34,6 +34,7 @@ GPIO Map (active-low relays, active-high H-bridges):
 DS18B20 (1-Wire, GPIO 4):
   28-000000bd3d51 — Mixing chamber temp
   28-000000be5d11 — Exterior temp
+  28-000000bbdd26 — Interior (cabin) temp
 
 ADS1115 (I2C 0x48):
   CH0 — Mixing flap position feedback    (225–4090 mV → 0–100%)
@@ -90,6 +91,7 @@ SEAT_HEAT_PRESETS = {      # Named presets → duty cycle %
 # --- DS18B20 Sensor IDs (w1thermsensor reports IDs WITHOUT "28-" prefix) ---
 SENSOR_MIX_CHAMBER = "000000bd3d51"
 SENSOR_EXTERIOR    = "000000be5d11"
+SENSOR_INTERIOR    = "000000bbdd26"
 
 # --- State persistence ---
 # User settings survive power loss; saved on every command
@@ -180,6 +182,7 @@ class HVACState:
     # Sensor readings
     mix_chamber_temp_f: float = 0.0
     exterior_temp_f: float = 0.0
+    interior_temp_f: float = 0.0
 
     # Flap positions (0–100%)
     mix_flap_pos: float = 50.0
@@ -292,6 +295,7 @@ class HardwareManager:
             self._sim_foot_pos = 0.0
             self._sim_mix_temp = 68.0
             self._sim_ext_temp = 47.0
+            self._sim_int_temp = 72.0
 
     def _init_gpio(self):
         GPIO.setmode(GPIO.BCM)
@@ -444,6 +448,8 @@ class HardwareManager:
                 return self._sim_mix_temp
             elif sensor_id == SENSOR_EXTERIOR:
                 return self._sim_ext_temp
+            elif sensor_id == SENSOR_INTERIOR:
+                return self._sim_int_temp
             return None
 
         sensor = self._temp_sensors.get(sensor_id)
@@ -598,10 +604,13 @@ class HVACController:
             self._last_temp_read = now
             mix_t = self.hw.read_temp_f(SENSOR_MIX_CHAMBER)
             ext_t = self.hw.read_temp_f(SENSOR_EXTERIOR)
+            int_t = self.hw.read_temp_f(SENSOR_INTERIOR)
             if mix_t is not None:
                 self.state.mix_chamber_temp_f = round(mix_t, 1)
             if ext_t is not None:
                 self.state.exterior_temp_f = round(ext_t, 1)
+            if int_t is not None:
+                self.state.interior_temp_f = round(int_t, 1)
 
         self.state.onewire_ok = self.hw.onewire_ok
         self.state.ads_ok = self.hw.ads_ok
