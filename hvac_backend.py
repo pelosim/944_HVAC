@@ -616,10 +616,9 @@ class HVACController:
         self.state.ads_ok = self.hw.ads_ok
 
         # ── Safety interlocks ─────────────────────────────────
-        # Don't run AC and heat valve simultaneously (compressor load + wasted energy)
-        if self.state.ac_on and self.state.heat_valve:
-            # AC takes priority in conflict
-            self.state.heat_valve = False
+        # A/C and heat valve may run together on purpose: the A/C dries/cools
+        # the air and the heater core reheats it (reheat / dehumidify / defrost),
+        # exactly like production automotive HVAC. The blend flap sets final temp.
 
         # Fan must be on for AC
         if self.state.ac_on and self.state.fan_speed == "OFF":
@@ -641,10 +640,13 @@ class HVACController:
         self.state.footwell_flap_target = targets["footwell"]
 
         # ── Temperature PID → mixing flap target ──────────────
-        if self.state.fan_speed != "OFF" and self.state.mix_chamber_temp_f > 0:
+        # Closed-loop on CABIN (interior) temp: modulate the blend flap to
+        # drive the interior toward the setpoint. Setpoint 90 only commands
+        # HOT when the cabin is below 90; if the cabin is hotter, it cools.
+        if self.state.fan_speed != "OFF" and self.state.interior_temp_f > 0:
             # PID output: 0% = full cold, 100% = full hot
             mix_target = self.temp_pid.update(
-                self.state.setpoint_f, self.state.mix_chamber_temp_f
+                self.state.setpoint_f, self.state.interior_temp_f
             )
             self.state.mix_flap_target = max(0, min(100, mix_target))
         else:
@@ -687,13 +689,14 @@ class HVACController:
             self.hw._sim_def_pos = max(0, min(100, self.hw._sim_def_pos))
             self.hw._sim_foot_pos += max(-rate, min(rate, foot_cmd * 0.02))
             self.hw._sim_foot_pos = max(0, min(100, self.hw._sim_foot_pos))
-            # Simulate duct temp response
-            if self.state.heat_valve:
-                self.hw._sim_mix_temp += 0.05
-            elif self.state.ac_on:
-                self.hw._sim_mix_temp -= 0.03
-            else:
-                self.hw._sim_mix_temp += (self.hw._sim_ext_temp - self.hw._sim_mix_temp) * 0.002
+            # Duct temp = blend flap position between a cold and a hot source
+            # (heat valve supplies the hot side, A/C the cold side).
+            hot = 160.0 if self.state.heat_valve else 90.0
+            cold = 40.0 if self.state.ac_on else self.hw._sim_ext_temp
+            duct_target = cold + (hot - cold) * (self.hw._sim_mix_pos / 100.0)
+            self.hw._sim_mix_temp += (duct_target - self.hw._sim_mix_temp) * 0.05
+            # Cabin drifts toward the duct air temperature (what the PID reads)
+            self.hw._sim_int_temp += (self.hw._sim_mix_temp - self.hw._sim_int_temp) * 0.02
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
