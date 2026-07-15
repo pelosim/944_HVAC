@@ -102,6 +102,69 @@ function Lamp({ label, on, color = C.green }) {
   );
 }
 
+// ─── Directional chevrons (flow toward commanded target) ──────
+function Chevrons({ dir, color, size = 24 }) {
+  const n = 3;
+  return (
+    <div style={{ display: "flex", gap: 1, alignItems: "center" }}>
+      {Array.from({ length: n }).map((_, i) => {
+        const order = dir > 0 ? i : n - 1 - i; // stagger so the flow points the travel way
+        return (
+          <svg key={i} width={size * 0.62} height={size} viewBox="0 0 18 26" fill="none">
+            <path d={dir > 0 ? "M5 5 L12 13 L5 21" : "M13 5 L6 13 L13 21"}
+              stroke={color} strokeWidth={3.4} strokeLinecap="round" strokeLinejoin="round"
+              style={{
+                animation: "flapChev 0.8s ease-in-out infinite",
+                animationDelay: `${order * 0.13}s`,
+                filter: `drop-shadow(0 0 4px ${color})`,
+              }} />
+          </svg>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Flap track: segmented actual fill + commanded-target caret ─
+function FlapTrack({ actual, target, base, dirColor, dir, n = 22, h = 16 }) {
+  const lo = Math.min(actual, target);
+  const hi = Math.max(actual, target);
+  const tgt = Math.max(0, Math.min(100, target));
+  const markColor = dir === 0 ? base : dirColor;
+  return (
+    <div style={{ position: "relative", paddingTop: 10 }}>
+      {/* commanded-target caret */}
+      <div style={{
+        position: "absolute", top: 0, left: `${tgt}%`, transform: "translateX(-50%)",
+        width: 0, height: 0, borderLeft: "6px solid transparent", borderRight: "6px solid transparent",
+        borderTop: `8px solid ${markColor}`,
+        filter: `drop-shadow(0 0 4px ${markColor})`,
+        transition: "left 0.25s ease",
+      }} />
+      <div style={{ display: "flex", gap: 3, height: h }}>
+        {Array.from({ length: n }).map((_, i) => {
+          const c = ((i + 0.5) / n) * 100;
+          const solid = c <= lo;                 // guaranteed position
+          const inDelta = c > lo && c <= hi;     // sweep zone toward target
+          return (
+            <div key={i} style={{
+              flex: 1, borderRadius: 2,
+              background: solid ? base : inDelta ? dirColor : C.segOff,
+              boxShadow: solid ? `0 0 7px ${base}90`
+                : inDelta ? `0 0 6px ${dirColor}80`
+                : "inset 0 1px 2px rgba(0,0,0,0.65)",
+              transform: "skewX(-8deg)",
+              animation: inDelta ? "flapSweep 0.9s ease-in-out infinite" : "none",
+              animationDelay: inDelta ? `${(dir >= 0 ? i : n - i) * 0.05}s` : "0s",
+              transition: "background 0.12s, box-shadow 0.12s",
+            }} />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── Column divider (machined groove) ─────────────────────────
 function Groove() {
   return <div style={{
@@ -133,6 +196,9 @@ export default function HVACDashboard() {
   const [mixFlap, setMixFlap] = useState(35);
   const [defrostFlap, setDefrostFlap] = useState(0);
   const [footFlap, setFootFlap] = useState(0);
+  const [mixFlapTarget, setMixFlapTarget] = useState(50);
+  const [defrostFlapTarget, setDefrostFlapTarget] = useState(0);
+  const [footFlapTarget, setFootFlapTarget] = useState(0);
   const [onewireOk, setOnewireOk] = useState(false);
   const [adsOk, setAdsOk] = useState(false);
   const [controlActive, setControlActive] = useState(false);
@@ -166,6 +232,9 @@ export default function HVACDashboard() {
           if (s.mix_flap_pos !== undefined) setMixFlap(s.mix_flap_pos);
           if (s.defrost_flap_pos !== undefined) setDefrostFlap(s.defrost_flap_pos);
           if (s.footwell_flap_pos !== undefined) setFootFlap(s.footwell_flap_pos);
+          if (s.mix_flap_target !== undefined) setMixFlapTarget(s.mix_flap_target);
+          if (s.defrost_flap_target !== undefined) setDefrostFlapTarget(s.defrost_flap_target);
+          if (s.footwell_flap_target !== undefined) setFootFlapTarget(s.footwell_flap_target);
           if (s.seat_heat_driver !== undefined) setDriverSeatHeat(s.seat_heat_driver);
           if (s.seat_heat_passenger !== undefined) setPassengerSeatHeat(s.seat_heat_passenger);
           if (s.onewire_ok !== undefined) setOnewireOk(s.onewire_ok);
@@ -274,6 +343,8 @@ export default function HVACDashboard() {
         input[type=range]::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:${C.segOff}}
         input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:26px;height:26px;border-radius:5px;margin-top:-10px;background:linear-gradient(180deg,#3d4854,#1e252c);border:1px solid #4d5a66;box-shadow:0 2px 6px rgba(0,0,0,0.6)}
         @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.35}}
+        @keyframes flapSweep{0%,100%{opacity:0.3}50%{opacity:0.95}}
+        @keyframes flapChev{0%{opacity:0.12}50%{opacity:1}100%{opacity:0.12}}
         @keyframes powerOn{0%{opacity:0;filter:brightness(2.6)}45%{opacity:1;filter:brightness(1.5)}100%{opacity:1;filter:brightness(1)}}
         .band{animation:powerOn 0.8s ease both}
       `}</style>
@@ -439,25 +510,51 @@ export default function HVACDashboard() {
               </div>
             </div>
 
-            {/* Actuator seg bars */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 13 }}>
+            {/* Actuator flaps — position + commanded direction */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               {[
-                { label: "Blend", val: mixFlap, color: mixFlap > 60 ? C.amber : mixFlap < 40 ? C.ice : C.vfd },
-                { label: "Defrost", val: defrostFlap, color: C.amber },
-                { label: "Footwell", val: footFlap, color: C.vfd },
-              ].map((a) => (
-                <div key={a.label} style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <span style={{ ...labelStyle, fontSize: 22, width: 132, flexShrink: 0 }}>{a.label}</span>
-                  <div style={{ flex: 1 }}>
-                    <Segs value={a.val} n={20} color={a.color} h={12} />
+                { label: "Blend", val: mixFlap, target: mixFlapTarget,
+                  base: mixFlap > 60 ? C.amber : mixFlap < 40 ? C.ice : C.vfd,
+                  hi: { word: "HOT", color: C.amber }, lo: { word: "COLD", color: C.ice } },
+                { label: "Defrost", val: defrostFlap, target: defrostFlapTarget,
+                  base: C.amber,
+                  hi: { word: "OPEN", color: C.amber }, lo: { word: "SHUT", color: C.mid } },
+                { label: "Footwell", val: footFlap, target: footFlapTarget,
+                  base: C.vfd,
+                  hi: { word: "OPEN", color: C.vfd }, lo: { word: "SHUT", color: C.mid } },
+              ].map((a) => {
+                const delta = a.target - a.val;
+                const TH = 1.5; // deadband — below this the flap is holding
+                const dir = delta > TH ? 1 : delta < -TH ? -1 : 0;
+                const dd = dir > 0 ? a.hi : dir < 0 ? a.lo : null;
+                const dirColor = dd ? dd.color : a.base;
+                return (
+                  <div key={a.label} style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ ...labelStyle, fontSize: 22, width: 118, flexShrink: 0 }}>{a.label}</span>
+                      {/* commanded-direction indicator */}
+                      <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6,
+                        justifyContent: "flex-end" }}>
+                        {dir < 0 && <Chevrons dir={-1} color={dirColor} />}
+                        <span style={{
+                          fontFamily: "'Rajdhani',sans-serif", fontSize: 19, fontWeight: 700,
+                          letterSpacing: 2, minWidth: 52, textAlign: "center",
+                          color: dd ? dirColor : C.dim,
+                          textShadow: dd ? `0 0 8px ${dirColor}70` : "none",
+                        }}>{dd ? dd.word : "HOLD"}</span>
+                        {dir > 0 && <Chevrons dir={1} color={dirColor} />}
+                      </div>
+                      <span style={{
+                        fontFamily: "'Orbitron',monospace", fontSize: 25, fontWeight: 700,
+                        color: a.base, width: 74, textAlign: "right",
+                        textShadow: `0 0 8px ${a.base}50`, fontVariantNumeric: "tabular-nums",
+                      }}>{Math.round(a.val)}<span style={{ fontSize: 12, color: C.mid }}>%</span></span>
+                    </div>
+                    <FlapTrack actual={a.val} target={a.target} base={a.base}
+                      dirColor={dirColor} dir={dir} />
                   </div>
-                  <span style={{
-                    fontFamily: "'Orbitron',monospace", fontSize: 25, fontWeight: 700,
-                    color: a.color, width: 84, textAlign: "right",
-                    textShadow: `0 0 8px ${a.color}50`, fontVariantNumeric: "tabular-nums",
-                  }}>{Math.round(a.val)}<span style={{ fontSize: 12, color: C.mid }}>%</span></span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
