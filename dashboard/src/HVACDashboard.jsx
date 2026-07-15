@@ -144,8 +144,8 @@ function FlapTrack({ actual, target, base, dirColor, dir, n = 22, h = 16 }) {
       <div style={{ display: "flex", gap: 3, height: h }}>
         {Array.from({ length: n }).map((_, i) => {
           const c = ((i + 0.5) / n) * 100;
-          const solid = c <= lo;                 // guaranteed position
-          const inDelta = c > lo && c <= hi;     // sweep zone toward target
+          const solid = c <= lo;                        // guaranteed position
+          const inDelta = dir !== 0 && c > lo && c <= hi; // sweep zone — only while driving
           return (
             <div key={i} style={{
               flex: 1, borderRadius: 2,
@@ -525,7 +525,8 @@ export default function HVACDashboard() {
               ].map((a) => {
                 const delta = a.target - a.val;
                 const TH = 1.5; // deadband — below this the flap is holding
-                const dir = delta > TH ? 1 : delta < -TH ? -1 : 0;
+                // only show drive direction when the control loop is actually driving
+                const dir = controlActive ? (delta > TH ? 1 : delta < -TH ? -1 : 0) : 0;
                 const dd = dir > 0 ? a.hi : dir < 0 ? a.lo : null;
                 const dirColor = dd ? dd.color : a.base;
                 return (
