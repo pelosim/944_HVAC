@@ -194,6 +194,8 @@ export default function HVACDashboard() {
   const [mixTemp, setMixTemp] = useState(68.4);
   const [extTemp, setExtTemp] = useState(47);
   const [interiorTemp, setInteriorTemp] = useState(72);
+  const [testOverride, setTestOverride] = useState(false);
+  const [testInteriorTemp, setTestInteriorTemp] = useState(72);
   const [mixFlap, setMixFlap] = useState(35);
   const [defrostFlap, setDefrostFlap] = useState(0);
   const [footFlap, setFootFlap] = useState(0);
@@ -231,6 +233,8 @@ export default function HVACDashboard() {
           if (s.mix_chamber_temp_f !== undefined) setMixTemp(s.mix_chamber_temp_f);
           if (s.exterior_temp_f !== undefined) setExtTemp(s.exterior_temp_f);
           if (s.interior_temp_f !== undefined) setInteriorTemp(s.interior_temp_f);
+          if (s.test_override !== undefined) setTestOverride(s.test_override);
+          if (s.test_interior_temp_f !== undefined) setTestInteriorTemp(s.test_interior_temp_f);
           if (s.mix_flap_pos !== undefined) setMixFlap(s.mix_flap_pos);
           if (s.defrost_flap_pos !== undefined) setDefrostFlap(s.defrost_flap_pos);
           if (s.footwell_flap_pos !== undefined) setFootFlap(s.footwell_flap_pos);
@@ -276,6 +280,20 @@ export default function HVACDashboard() {
   const cmdVentMode = (v) => { setVentMode(v); sendCmd({ vent_mode: v }); };
   const cmdDriverSeatHeat = (v) => { setDriverSeatHeat(v); sendCmd({ seat_heat_driver: v }); };
   const cmdPassengerSeatHeat = (v) => { setPassengerSeatHeat(v); sendCmd({ seat_heat_passenger: v }); };
+  const cmdTestOverride = (v) => {
+    setTestOverride(v);
+    if (v) {
+      const seed = Math.round(interiorTemp); // start from the current cabin reading
+      setTestInteriorTemp(seed);
+      sendCmd({ test_override: true, test_interior_temp_f: seed });
+    } else {
+      sendCmd({ test_override: false });
+    }
+  };
+  const cmdTestInteriorTemp = (v) => {
+    const val = Math.max(20, Math.min(140, Math.round(v)));
+    setTestInteriorTemp(val); sendCmd({ test_interior_temp_f: val });
+  };
 
   // Hold-to-repeat for setpoint
   const holdRef = useRef(null);
@@ -332,6 +350,13 @@ export default function HVACDashboard() {
     color: active ? color : C.mid,
     textShadow: active ? `0 0 9px ${color}70` : "none",
   });
+  const testBtn = {
+    width: 78, height: 62, borderRadius: 9, flexShrink: 0,
+    border: `1.5px solid ${C.amber}66`,
+    background: `linear-gradient(180deg, ${C.fasciaHi}, ${C.fascia})`,
+    color: C.amber, fontSize: 42, fontFamily: "'Orbitron',monospace", fontWeight: 700,
+    textShadow: `0 0 10px ${C.amber}60`, userSelect: "none", WebkitUserSelect: "none",
+  };
 
   return (
     <>
@@ -364,6 +389,44 @@ export default function HVACDashboard() {
             repeating-linear-gradient(0deg, transparent 0 3px, rgba(0,0,0,0.08) 3px 4px)`,
         }} />
 
+        {/* ════ BENCH-TEST OVERRIDE PANEL ════ */}
+        {testOverride && (
+          <div style={{
+            position: "absolute", top: 82, left: 22, zIndex: 30, width: 452,
+            padding: "14px 18px 16px", borderRadius: 12,
+            border: `2px solid ${C.amber}`,
+            background: "linear-gradient(180deg, #1b1408, #0a0e13)",
+            boxShadow: `0 0 26px ${C.amber}40, 0 10px 34px rgba(0,0,0,0.6)`,
+          }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+              <span style={{ fontFamily: "'Orbitron',monospace", fontSize: 17, fontWeight: 700,
+                letterSpacing: 2.5, color: C.amber, textShadow: `0 0 10px ${C.amber}70` }}>
+                BENCH TEST · CABIN TEMP</span>
+              <button onClick={() => cmdTestOverride(false)} style={{
+                padding: "5px 13px", borderRadius: 6, border: `1.5px solid ${C.amber}`,
+                background: "transparent", color: C.amber, fontFamily: "'Rajdhani',sans-serif",
+                fontSize: 15, fontWeight: 700, letterSpacing: 2 }}>EXIT</button>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <button onClick={() => cmdTestInteriorTemp(testInteriorTemp - 1)} style={testBtn}>−</button>
+              <div style={{ flex: 1, textAlign: "center", lineHeight: 0.9 }}>
+                <span style={{ fontFamily: "'Orbitron',monospace", fontSize: 64, fontWeight: 800,
+                  color: C.amber, textShadow: `0 0 18px ${C.amber}60`, fontVariantNumeric: "tabular-nums" }}>
+                  {Math.round(testInteriorTemp)}</span>
+                <span style={{ fontSize: 22, color: C.mid, fontWeight: 600 }}>°F</span>
+              </div>
+              <button onClick={() => cmdTestInteriorTemp(testInteriorTemp + 1)} style={testBtn}>+</button>
+            </div>
+            <input type="range" min={20} max={140} value={Math.round(testInteriorTemp)}
+              onChange={(e) => cmdTestInteriorTemp(Number(e.target.value))}
+              style={{ width: "100%", height: 26, appearance: "none", WebkitAppearance: "none",
+                cursor: "pointer", accentColor: C.amber, margin: "6px 0 0" }} />
+            <span style={{ display: "block", marginTop: 6, fontFamily: "'Rajdhani',sans-serif",
+              fontSize: 14, fontWeight: 600, letterSpacing: 0.4, color: C.mid }}>
+              Injecting a fake interior reading — the temp PID and INTERIOR gauge use this. Resets on reboot.</span>
+          </div>
+        )}
+
         {/* ════ BAND 1 — HEADER RAIL ════ */}
         <div className="band" style={{
           display: "flex", alignItems: "center", gap: 26, padding: "0 28px",
@@ -389,6 +452,17 @@ export default function HVACDashboard() {
             <Lamp label="A/C CLU" on={acOn} color={C.ice} />
           </div>
 
+          <button onClick={() => cmdTestOverride(!testOverride)} style={{
+            padding: "7px 15px", borderRadius: 6, whiteSpace: "nowrap",
+            border: `1.5px solid ${testOverride ? C.amber : C.line}`,
+            background: testOverride ? `${C.amber}1e` : "transparent",
+            color: testOverride ? C.amber : C.mid,
+            fontFamily: "'Rajdhani',sans-serif", fontSize: 16, fontWeight: 700, letterSpacing: 2,
+            textShadow: testOverride ? `0 0 8px ${C.amber}70` : "none",
+            boxShadow: testOverride ? `0 0 14px ${C.amber}40` : "none",
+            animation: testOverride ? "pulse 1.6s ease-in-out infinite" : "none",
+          }}>TEST</button>
+
           <div style={{ width: 2, height: 36, background: C.line }} />
 
           <span style={{ fontFamily: "'Orbitron',monospace", fontSize: 34, fontWeight: 700,
@@ -408,12 +482,20 @@ export default function HVACDashboard() {
             {[
               { label: "OUTSIDE", val: extTemp, min: -20, max: 120, color: C.vfd },
               { label: "INTERIOR", val: interiorTemp, min: 20, max: 140,
-                color: interiorTemp > 82 ? C.amber : interiorTemp < 62 ? C.ice : C.vfd },
+                color: interiorTemp > 82 ? C.amber : interiorTemp < 62 ? C.ice : C.vfd,
+                override: testOverride },
               { label: "DUCT", val: mixTemp, min: 32, max: 180, color: mixTemp > 100 ? C.amber : C.vfd },
             ].map((t) => (
               <div key={t.label} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
-                  <span style={labelStyle}>{t.label}</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={labelStyle}>{t.label}</span>
+                    {t.override && <span style={{
+                      fontFamily: "'Rajdhani',sans-serif", fontSize: 13, fontWeight: 700,
+                      letterSpacing: 1.5, color: C.amber, border: `1px solid ${C.amber}`,
+                      borderRadius: 4, padding: "0 6px", textShadow: `0 0 6px ${C.amber}70`,
+                    }}>TEST</span>}
+                  </div>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
                     <span style={{
                       fontFamily: "'Orbitron',monospace", fontSize: 66, fontWeight: 700, lineHeight: 0.95,

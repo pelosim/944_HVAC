@@ -204,6 +204,10 @@ class HVACState:
     seat_heat_driver: float = 0.0
     seat_heat_passenger: float = 0.0
 
+    # Bench-test override — inject a fake cabin temp (NOT persisted; off on reboot)
+    test_override: bool = False
+    test_interior_temp_f: float = 72.0
+
     def to_json(self):
         return json.dumps(asdict(self))
 
@@ -585,6 +589,10 @@ class HVACController:
             self.state.seat_heat_driver = max(0, min(100, float(cmd["seat_heat_driver"])))
         if "seat_heat_passenger" in cmd:
             self.state.seat_heat_passenger = max(0, min(100, float(cmd["seat_heat_passenger"])))
+        if "test_override" in cmd:
+            self.state.test_override = bool(cmd["test_override"])
+        if "test_interior_temp_f" in cmd:
+            self.state.test_interior_temp_f = max(20, min(140, float(cmd["test_interior_temp_f"])))
         # Persist user settings after every command
         self._save_state()
 
@@ -614,6 +622,12 @@ class HVACController:
 
         self.state.onewire_ok = self.hw.onewire_ok
         self.state.ads_ok = self.hw.ads_ok
+
+        # ── Bench-test override ───────────────────────────────
+        # Force a fake cabin temp so heating can be exercised indoors.
+        # Not persisted; a reboot always returns to the real sensor.
+        if self.state.test_override:
+            self.state.interior_temp_f = round(self.state.test_interior_temp_f, 1)
 
         # ── Safety interlocks ─────────────────────────────────
         # A/C and heat valve may run together on purpose: the A/C dries/cools
