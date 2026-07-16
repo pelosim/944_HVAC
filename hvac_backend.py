@@ -118,6 +118,11 @@ FLAP_PID_KP = 2.0    # Proportional gain
 FLAP_PID_KI = 0.5    # Integral gain
 FLAP_PID_KD = 0.1    # Derivative gain
 FLAP_DEADBAND = 2.0  # % — don't drive motor within this band of setpoint
+# Flap overdrive protection: if a flap is driven this long without its feedback
+# advancing at least FLAP_PROGRESS_EPS, cut the motor — stall, end-stop, or lost
+# feedback. Set from the measured full-travel time + margin (bench test).
+FLAP_MAX_DRIVE_S  = 8.0   # seconds of no-progress driving before cutoff
+FLAP_PROGRESS_EPS = 1.5   # % of travel that still counts as "moving"
 
 # Temperature control PID (drives mixing flap setpoint)
 TEMP_PID_KP = 3.0
@@ -193,6 +198,11 @@ class HVACState:
     mix_flap_target: float = 50.0
     defrost_flap_target: float = 0.0
     footwell_flap_target: float = 0.0
+
+    # Flap drive-watchdog faults (stall / end-stop / lost feedback → motor cut)
+    mix_flap_fault: bool = False
+    defrost_flap_fault: bool = False
+    footwell_flap_fault: bool = False
 
     # System status
     control_active: bool = False
@@ -538,6 +548,47 @@ class HVACController:
         # Sensor read timing (DS18B20 is slow, don't hammer it)
         self._last_temp_read = 0
 
+        # Flap drive watchdog (per flap): overdrive / stall protection.
+        # t0 = start of no-progress driving, ref = position at t0, fault = latched.
+        self._flap_wd = {n: {"t0": None, "ref": 0.0, "fault": False}
+                         for n in ("mix", "def", "foot")}
+
+    def _guard_flap(self, name, cmd, pos, now):
+        """Overdrive protection for one flap. Cuts the motor when it is driven
+        without the feedback making progress (stall / end-stop / lost feedback)
+        and latches a fault until the flap physically moves again. Returns the
+        command actually safe to apply."""
+        wd = self._flap_wd[name]
+        # Invalid feedback (ADS error / no channel) → never drive blind.
+        if pos < 0:
+            wd["t0"] = None
+            wd["fault"] = True
+            return 0.0
+        # Settled in deadband / not commanded → healthy, reset watchdog.
+        if cmd == 0:
+            wd["t0"] = None
+            wd["fault"] = False
+            wd["ref"] = pos
+            return 0.0
+        # Latched fault: keep the motor off until the flap actually moves.
+        if wd["fault"]:
+            if abs(pos - wd["ref"]) > FLAP_PROGRESS_EPS:
+                wd["fault"] = False          # unstuck — allow driving again
+            else:
+                return 0.0
+        # Driving: start the watchdog, or reset it whenever we see progress.
+        if wd["t0"] is None or abs(pos - wd["ref"]) > FLAP_PROGRESS_EPS:
+            wd["t0"] = now
+            wd["ref"] = pos
+        elif now - wd["t0"] > FLAP_MAX_DRIVE_S:
+            wd["fault"] = True
+            wd["t0"] = None
+            log.warning("Flap %s: no feedback progress in %.1fs while driving — "
+                        "cutting motor (stall / end-stop / lost feedback)",
+                        name, FLAP_MAX_DRIVE_S)
+            return 0.0
+        return cmd
+
     # ── State persistence (survives power loss) ──────────────
     _PERSIST_FIELDS = ("setpoint_f", "fan_speed", "ac_on", "heat_valve",
                        "outside_air", "vent_mode", "seat_heat_driver",
@@ -684,11 +735,24 @@ class HVACController:
             mix_cmd = self.mix_pid.update(self.state.mix_flap_target, self.state.mix_flap_pos)
             def_cmd = self.def_pid.update(self.state.defrost_flap_target, self.state.defrost_flap_pos)
             foot_cmd = self.foot_pid.update(self.state.footwell_flap_target, self.state.footwell_flap_pos)
+            # Overdrive / stall protection — cut a motor that isn't making progress
+            mix_cmd = self._guard_flap("mix", mix_cmd, self.state.mix_flap_pos, now)
+            def_cmd = self._guard_flap("def", def_cmd, self.state.defrost_flap_pos, now)
+            foot_cmd = self._guard_flap("foot", foot_cmd, self.state.footwell_flap_pos, now)
         else:
             mix_cmd = def_cmd = foot_cmd = 0
             self.mix_pid.reset()
             self.def_pid.reset()
             self.foot_pid.reset()
+            # System off → clear watchdogs and any latched faults
+            for wd in self._flap_wd.values():
+                wd["t0"] = None
+                wd["fault"] = False
+
+        # Publish flap fault status for the dashboard
+        self.state.mix_flap_fault = self._flap_wd["mix"]["fault"]
+        self.state.defrost_flap_fault = self._flap_wd["def"]["fault"]
+        self.state.footwell_flap_fault = self._flap_wd["foot"]["fault"]
 
         self.hw.drive_mix_flap(mix_cmd)
         self.hw.drive_defrost_flap(def_cmd)

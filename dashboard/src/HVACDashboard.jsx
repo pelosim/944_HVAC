@@ -202,6 +202,9 @@ export default function HVACDashboard() {
   const [mixFlapTarget, setMixFlapTarget] = useState(50);
   const [defrostFlapTarget, setDefrostFlapTarget] = useState(0);
   const [footFlapTarget, setFootFlapTarget] = useState(0);
+  const [mixFlapFault, setMixFlapFault] = useState(false);
+  const [defrostFlapFault, setDefrostFlapFault] = useState(false);
+  const [footFlapFault, setFootFlapFault] = useState(false);
   const [onewireOk, setOnewireOk] = useState(false);
   const [adsOk, setAdsOk] = useState(false);
   const [controlActive, setControlActive] = useState(false);
@@ -241,6 +244,9 @@ export default function HVACDashboard() {
           if (s.mix_flap_target !== undefined) setMixFlapTarget(s.mix_flap_target);
           if (s.defrost_flap_target !== undefined) setDefrostFlapTarget(s.defrost_flap_target);
           if (s.footwell_flap_target !== undefined) setFootFlapTarget(s.footwell_flap_target);
+          if (s.mix_flap_fault !== undefined) setMixFlapFault(s.mix_flap_fault);
+          if (s.defrost_flap_fault !== undefined) setDefrostFlapFault(s.defrost_flap_fault);
+          if (s.footwell_flap_fault !== undefined) setFootFlapFault(s.footwell_flap_fault);
           if (s.seat_heat_driver !== undefined) setDriverSeatHeat(s.seat_heat_driver);
           if (s.seat_heat_passenger !== undefined) setPassengerSeatHeat(s.seat_heat_passenger);
           if (s.onewire_ok !== undefined) setOnewireOk(s.onewire_ok);
@@ -599,13 +605,13 @@ export default function HVACDashboard() {
             {/* Actuator flaps — position + commanded direction */}
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               {[
-                { label: "Blend", val: mixFlap, target: mixFlapTarget,
+                { label: "Blend", val: mixFlap, target: mixFlapTarget, fault: mixFlapFault,
                   base: mixFlap > 60 ? C.amber : mixFlap < 40 ? C.ice : C.vfd,
                   hi: { word: "HOT", color: C.amber }, lo: { word: "COLD", color: C.ice } },
-                { label: "Defrost", val: defrostFlap, target: defrostFlapTarget,
+                { label: "Defrost", val: defrostFlap, target: defrostFlapTarget, fault: defrostFlapFault,
                   base: C.amber,
                   hi: { word: "OPEN", color: C.amber }, lo: { word: "SHUT", color: C.mid } },
-                { label: "Footwell", val: footFlap, target: footFlapTarget,
+                { label: "Footwell", val: footFlap, target: footFlapTarget, fault: footFlapFault,
                   base: C.vfd,
                   hi: { word: "OPEN", color: C.vfd }, lo: { word: "SHUT", color: C.mid } },
               ].map((a) => {
@@ -615,6 +621,7 @@ export default function HVACDashboard() {
                 const dir = controlActive ? (delta > TH ? 1 : delta < -TH ? -1 : 0) : 0;
                 const dd = dir > 0 ? a.hi : dir < 0 ? a.lo : null;
                 const dirColor = dd ? dd.color : a.base;
+                const eff = a.fault ? 0 : dir; // no sweep animation while faulted
                 return (
                   <div key={a.label} style={{ display: "flex", flexDirection: "column", gap: 1 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -622,14 +629,24 @@ export default function HVACDashboard() {
                       {/* commanded-direction indicator */}
                       <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6,
                         justifyContent: "flex-end" }}>
-                        {dir < 0 && <Chevrons dir={-1} color={dirColor} />}
-                        <span style={{
-                          fontFamily: "'Rajdhani',sans-serif", fontSize: 19, fontWeight: 700,
-                          letterSpacing: 2, minWidth: 52, textAlign: "center",
-                          color: dd ? dirColor : C.dim,
-                          textShadow: dd ? `0 0 8px ${dirColor}70` : "none",
-                        }}>{dd ? dd.word : "HOLD"}</span>
-                        {dir > 0 && <Chevrons dir={1} color={dirColor} />}
+                        {a.fault ? (
+                          <span style={{
+                            fontFamily: "'Rajdhani',sans-serif", fontSize: 19, fontWeight: 800,
+                            letterSpacing: 2.5, color: C.red, textShadow: `0 0 10px ${C.red}`,
+                            animation: "pulse 1s ease-in-out infinite",
+                          }}>FAULT</span>
+                        ) : (
+                          <>
+                            {dir < 0 && <Chevrons dir={-1} color={dirColor} />}
+                            <span style={{
+                              fontFamily: "'Rajdhani',sans-serif", fontSize: 19, fontWeight: 700,
+                              letterSpacing: 2, minWidth: 52, textAlign: "center",
+                              color: dd ? dirColor : C.dim,
+                              textShadow: dd ? `0 0 8px ${dirColor}70` : "none",
+                            }}>{dd ? dd.word : "HOLD"}</span>
+                            {dir > 0 && <Chevrons dir={1} color={dirColor} />}
+                          </>
+                        )}
                       </div>
                       <span style={{
                         fontFamily: "'Orbitron',monospace", fontSize: 25, fontWeight: 700,
@@ -638,7 +655,7 @@ export default function HVACDashboard() {
                       }}>{Math.round(a.val)}<span style={{ fontSize: 12, color: C.mid }}>%</span></span>
                     </div>
                     <FlapTrack actual={a.val} target={a.target} base={a.base}
-                      dirColor={dirColor} dir={dir} />
+                      dirColor={dirColor} dir={eff} />
                   </div>
                 );
               })}
