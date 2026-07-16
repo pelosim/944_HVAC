@@ -50,6 +50,7 @@ Install:
 import asyncio
 import json
 import logging
+import threading
 import time
 from dataclasses import dataclass, field, asdict
 from enum import Enum
@@ -298,10 +299,17 @@ class HardwareManager:
         self._temp_sensors = {}
         self._seat_pwm = {}
 
+        # Latest DS18B20 readings (°F), filled by a background reader thread.
+        # A 1-Wire conversion blocks ~750ms per sensor — reading inline in the
+        # async control loop stalled the whole event loop to ~0.4Hz.
+        self._temp_cache = {}
+
         if not SIMULATE:
             self._init_gpio()
             self._init_ads()
             self._init_temps()
+            threading.Thread(target=self._temp_reader_loop, daemon=True,
+                             name="ds18b20-reader").start()
         else:
             log.info("SIMULATION: Hardware stubs active")
             self._sim_mix_pos = 50.0
@@ -360,6 +368,18 @@ class HardwareManager:
             log.warning("No DS18B20 sensors found")
         except Exception as e:
             log.error("1-Wire init failed: %s", e)
+
+    def _temp_reader_loop(self):
+        """Daemon thread: continuously read the (slow, blocking) DS18B20s and
+        cache the results so the async control loop never blocks on 1-Wire."""
+        while True:
+            for sid, sensor in list(self._temp_sensors.items()):
+                try:
+                    c = sensor.get_temperature()
+                    self._temp_cache[sid] = c * 9.0 / 5.0 + 32.0
+                except Exception as e:
+                    log.error("Temp read %s failed: %s", sid, e)
+            time.sleep(0.5)
 
     # ── Relay Control ──────────────────────────────────────────
     def set_relay(self, pin: int, active: bool):
@@ -466,15 +486,9 @@ class HardwareManager:
                 return self._sim_int_temp
             return None
 
-        sensor = self._temp_sensors.get(sensor_id)
-        if sensor is None:
-            return None
-        try:
-            c = sensor.get_temperature()
-            return c * 9.0 / 5.0 + 32.0
-        except Exception as e:
-            log.error("Temp read %s failed: %s", sensor_id, e)
-            return None
+        # Non-blocking: latest value from the background reader thread
+        # (None until the first successful conversion).
+        return self._temp_cache.get(sensor_id)
 
     @property
     def onewire_ok(self) -> bool:
