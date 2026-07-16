@@ -180,6 +180,7 @@ export default function HVACDashboard() {
   // ─── WebSocket ────────────────────────────────────────────
   const wsRef = useRef(null);
   const reconnectRef = useRef(null);
+  const pendingRef = useRef({}); // fields we've just commanded, awaiting backend echo
   const [wsConnected, setWsConnected] = useState(false);
 
   // ─── Synced state ─────────────────────────────────────────
@@ -213,6 +214,10 @@ export default function HVACDashboard() {
 
   const sendCmd = useCallback((cmd) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      // Remember what we just commanded so stale in-flight broadcasts for these
+      // fields can't momentarily revert the UI before the backend confirms.
+      const expires = Date.now() + 800;
+      for (const k in cmd) pendingRef.current[k] = { value: cmd[k], expires };
       wsRef.current.send(JSON.stringify(cmd));
     }
   }, []);
@@ -228,31 +233,44 @@ export default function HVACDashboard() {
       ws.onmessage = (event) => {
         try {
           const s = JSON.parse(event.data);
-          if (s.setpoint_f !== undefined) setSetpoint(s.setpoint_f);
-          if (s.fan_speed !== undefined) setFanSpeed(s.fan_speed);
-          if (s.ac_on !== undefined) setAcOn(s.ac_on);
-          if (s.heat_valve !== undefined) setHeatValve(s.heat_valve);
-          if (s.outside_air !== undefined) setOutsideAir(s.outside_air);
-          if (s.vent_mode !== undefined) setVentMode(s.vent_mode);
-          if (s.mix_chamber_temp_f !== undefined) setMixTemp(s.mix_chamber_temp_f);
-          if (s.exterior_temp_f !== undefined) setExtTemp(s.exterior_temp_f);
-          if (s.interior_temp_f !== undefined) setInteriorTemp(s.interior_temp_f);
-          if (s.test_override !== undefined) setTestOverride(s.test_override);
-          if (s.test_interior_temp_f !== undefined) setTestInteriorTemp(s.test_interior_temp_f);
-          if (s.mix_flap_pos !== undefined) setMixFlap(s.mix_flap_pos);
-          if (s.defrost_flap_pos !== undefined) setDefrostFlap(s.defrost_flap_pos);
-          if (s.footwell_flap_pos !== undefined) setFootFlap(s.footwell_flap_pos);
-          if (s.mix_flap_target !== undefined) setMixFlapTarget(s.mix_flap_target);
-          if (s.defrost_flap_target !== undefined) setDefrostFlapTarget(s.defrost_flap_target);
-          if (s.footwell_flap_target !== undefined) setFootFlapTarget(s.footwell_flap_target);
-          if (s.mix_flap_fault !== undefined) setMixFlapFault(s.mix_flap_fault);
-          if (s.defrost_flap_fault !== undefined) setDefrostFlapFault(s.defrost_flap_fault);
-          if (s.footwell_flap_fault !== undefined) setFootFlapFault(s.footwell_flap_fault);
-          if (s.seat_heat_driver !== undefined) setDriverSeatHeat(s.seat_heat_driver);
-          if (s.seat_heat_passenger !== undefined) setPassengerSeatHeat(s.seat_heat_passenger);
-          if (s.onewire_ok !== undefined) setOnewireOk(s.onewire_ok);
-          if (s.ads_ok !== undefined) setAdsOk(s.ads_ok);
-          if (s.control_active !== undefined) setControlActive(s.control_active);
+          const now = Date.now();
+          // Apply a field unless we have an unconfirmed command for it. This
+          // drops stale in-flight echoes that would briefly revert a control
+          // you just pressed, until the backend confirms the new value (or 800ms).
+          const apply = (key, setter) => {
+            if (s[key] === undefined) return;
+            const p = pendingRef.current[key];
+            if (p) {
+              if (now <= p.expires && s[key] !== p.value) return; // stale echo — ignore
+              delete pendingRef.current[key];                     // confirmed or timed out
+            }
+            setter(s[key]);
+          };
+          apply("setpoint_f", setSetpoint);
+          apply("fan_speed", setFanSpeed);
+          apply("ac_on", setAcOn);
+          apply("heat_valve", setHeatValve);
+          apply("outside_air", setOutsideAir);
+          apply("vent_mode", setVentMode);
+          apply("mix_chamber_temp_f", setMixTemp);
+          apply("exterior_temp_f", setExtTemp);
+          apply("interior_temp_f", setInteriorTemp);
+          apply("test_override", setTestOverride);
+          apply("test_interior_temp_f", setTestInteriorTemp);
+          apply("mix_flap_pos", setMixFlap);
+          apply("defrost_flap_pos", setDefrostFlap);
+          apply("footwell_flap_pos", setFootFlap);
+          apply("mix_flap_target", setMixFlapTarget);
+          apply("defrost_flap_target", setDefrostFlapTarget);
+          apply("footwell_flap_target", setFootFlapTarget);
+          apply("mix_flap_fault", setMixFlapFault);
+          apply("defrost_flap_fault", setDefrostFlapFault);
+          apply("footwell_flap_fault", setFootFlapFault);
+          apply("seat_heat_driver", setDriverSeatHeat);
+          apply("seat_heat_passenger", setPassengerSeatHeat);
+          apply("onewire_ok", setOnewireOk);
+          apply("ads_ok", setAdsOk);
+          apply("control_active", setControlActive);
         } catch (e) { /* ignore */ }
       };
       ws.onclose = () => {
