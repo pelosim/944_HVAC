@@ -85,7 +85,7 @@ function Segs({ value, max = 100, n = 24, color = C.vfd, h = 14, vertical = fals
 }
 
 // ─── LED annunciator lamp ─────────────────────────────────────
-function Lamp({ label, on, color = C.green }) {
+function Lamp({ label, on, color = C.green, blink = false }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
       <div style={{
@@ -93,6 +93,7 @@ function Lamp({ label, on, color = C.green }) {
         background: on ? color : C.segOff,
         boxShadow: on ? `0 0 10px ${color}` : "inset 0 1px 2px rgba(0,0,0,0.7)",
         transition: "all 0.25s",
+        animation: on && blink ? "pulse 1s ease-in-out infinite" : "none",
       }} />
       <span style={{
         fontFamily: "'Rajdhani',sans-serif", fontSize: 18, fontWeight: 700,
@@ -332,6 +333,7 @@ export default function HVACDashboard() {
   const spColor = setpoint > 80 ? C.amber : setpoint < 68 ? C.ice : C.vfd;
   const fanPct = fanSpeed === "HI" ? 100 : fanSpeed === "LOW" ? 50 : 0;
   const seatColor = (v) => v > 66 ? C.amber : v > 33 ? "#ffc23d" : v > 0 ? "#ffd97a" : C.dim;
+  const anyFlapFault = mixFlapFault || defrostFlapFault || footFlapFault;
 
   // ─── Shared styles ────────────────────────────────────────
   const labelStyle = {
@@ -456,6 +458,7 @@ export default function HVACDashboard() {
             <Lamp label="ADC" on={adsOk} color={C.green} />
             <Lamp label="HEAT VLV" on={heatValve} color={C.amber} />
             <Lamp label="A/C CLU" on={acOn} color={C.ice} />
+            <Lamp label="FLAP" on={anyFlapFault} color={C.red} blink />
           </div>
 
           <button onClick={() => cmdTestOverride(!testOverride)} style={{
