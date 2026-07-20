@@ -2,14 +2,16 @@
 # labwc session autostart (installed to ~/.config/labwc/autostart).
 #
 # Dual output while the main touchscreen is being replaced:
-#   HDMI-A-1 (round panel)              -> Sport Chrono clock   (VNC :5900)
-#   HDMI-A-2 (forced 1920x720, cmdline) -> HVAC dashboard        (VNC :5901)
+#   HDMI-A-1 (round panel)              -> Sport Chrono clock
+#   HDMI-A-2 (forced 1920x720, cmdline) -> HVAC dashboard
 # rc.xml window rules pin each kiosk to its output; kanshi lays the two out.
+#
+# VNC: the system wayvnc.service serves ONE output at a time on :5900.
+# This WayVNC build double-frees on `output=` config pinning and a second
+# instance can't read the root-only TLS keys, so we don't run a 2nd instance.
+# Switch which screen :5900 shows with:
+#   sudo wayvncctl --socket=/tmp/wayvnc/wayvncctl.sock output-set HDMI-A-1  (clock)
+#   sudo wayvncctl --socket=/tmp/wayvnc/wayvncctl.sock output-set HDMI-A-2  (dashboard)
 
 /home/mark/hvac/deploy/clock-launch.sh &
 /home/mark/hvac/deploy/kiosk-launch.sh &
-
-# Second WayVNC instance for the dashboard output on :5901
-# (the system wayvnc.service serves the clock/round output on :5900).
-( sleep 6; wayvnc --config /etc/wayvnc/config-dash --output=HDMI-A-2 :: 5901 ) \
-  >/home/mark/hvac/wayvnc-dash.log 2>&1 &
