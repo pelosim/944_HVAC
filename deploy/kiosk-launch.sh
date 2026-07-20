@@ -11,6 +11,7 @@
 
 URL="http://localhost:8000"
 LOG="$HOME/hvac/kiosk.log"
+PROFILE="$HOME/.config/chromium-dash"
 
 exec >>"$LOG" 2>&1
 echo "$(date '+%F %T') kiosk-launch starting"
@@ -23,7 +24,7 @@ while [ "$i" -lt 90 ]; do
 done
 
 # Suppress Chromium's "restore pages / didn't shut down correctly" bar
-PREFS="$HOME/.config/chromium/Default/Preferences"
+PREFS="$PROFILE/Default/Preferences"
 if [ -f "$PREFS" ]; then
   sed -i \
     -e 's/"exit_type":"[^"]*"/"exit_type":"Normal"/' \
@@ -35,6 +36,8 @@ echo "$(date '+%F %T') launching chromium kiosk -> $URL"
 exec chromium-browser \
   --kiosk \
   --ozone-platform=wayland \
+  --class=hvac-dash \
+  --user-data-dir="$PROFILE" \
   --noerrdialogs \
   --disable-infobars \
   --disable-session-crashed-bubble \

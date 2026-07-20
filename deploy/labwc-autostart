@@ -1,11 +1,15 @@
 #!/bin/sh
 # labwc session autostart (installed to ~/.config/labwc/autostart).
 #
-# Interim: the main touchscreen is out for repair, so show the Sport Chrono
-# clock on the connected round HDMI screen. The HVAC backend keeps running
-# headless (reachable over VNC / the network).
-/home/mark/hvac/deploy/clock-launch.sh &
+# Dual output while the main touchscreen is being replaced:
+#   HDMI-A-1 (round panel)              -> Sport Chrono clock   (VNC :5900)
+#   HDMI-A-2 (forced 1920x720, cmdline) -> HVAC dashboard        (VNC :5901)
+# rc.xml window rules pin each kiosk to its output; kanshi lays the two out.
 
-# When the replacement dashboard screen is connected, also launch the dashboard
-# kiosk and pin each window to its output in ~/.config/labwc/rc.xml:
-# /home/mark/hvac/deploy/kiosk-launch.sh &
+/home/mark/hvac/deploy/clock-launch.sh &
+/home/mark/hvac/deploy/kiosk-launch.sh &
+
+# Second WayVNC instance for the dashboard output on :5901
+# (the system wayvnc.service serves the clock/round output on :5900).
+( sleep 6; wayvnc --config /etc/wayvnc/config-dash --output=HDMI-A-2 :: 5901 ) \
+  >/home/mark/hvac/wayvnc-dash.log 2>&1 &
