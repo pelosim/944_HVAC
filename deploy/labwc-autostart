@@ -1,4 +1,11 @@
 #!/bin/sh
 # labwc session autostart (installed to ~/.config/labwc/autostart).
-# Launches the 944S HVAC dashboard kiosk once the desktop session starts.
-/home/mark/hvac/deploy/kiosk-launch.sh &
+#
+# Interim: the main touchscreen is out for repair, so show the Sport Chrono
+# clock on the connected round HDMI screen. The HVAC backend keeps running
+# headless (reachable over VNC / the network).
+/home/mark/hvac/deploy/clock-launch.sh &
+
+# When the replacement dashboard screen is connected, also launch the dashboard
+# kiosk and pin each window to its output in ~/.config/labwc/rc.xml:
+# /home/mark/hvac/deploy/kiosk-launch.sh &
