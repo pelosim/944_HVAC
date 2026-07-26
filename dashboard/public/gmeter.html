@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>944S · G-Force</title>
+<style>
+  :root { --fit: 94; --nudge-x: -10px; --nudge-y: 12px; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; background: #000; overflow: hidden; cursor: none; }
+  #wrap { width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; background: #000; }
+  svg { width: min(calc(var(--fit)*1vw), calc(var(--fit)*1vh));
+        height: min(calc(var(--fit)*1vw), calc(var(--fit)*1vh));
+        display: block; position: relative; left: var(--nudge-x); top: var(--nudge-y); }
+  .ring   { fill: none; stroke: #1f6f6a; stroke-width: 2; }
+  .rlab   { fill: #4b6f6c; font-family: 'Rajdhani','Helvetica Neue',Arial,sans-serif; font-weight: 600; font-size: 26px; }
+  .axlab  { fill: #7f8a90; font-family: 'Rajdhani','Helvetica Neue',Arial,sans-serif; font-weight: 700; font-size: 30px; letter-spacing: 4px; }
+  .big    { fill: #eaf6f4; font-family: 'Orbitron','Arial Black',sans-serif; font-weight: 800; }
+  .unit   { fill: #7f8a90; font-family: 'Rajdhani',Arial,sans-serif; font-weight: 600; }
+  .dlab   { fill: #6f7a80; font-family: 'Rajdhani',Arial,sans-serif; font-weight: 700; letter-spacing: 3px; font-size: 24px; }
+  .dval   { font-family: 'Orbitron',Arial,sans-serif; font-weight: 700; }
+  .brand  { fill: #b9bdc2; font-family: 'Helvetica Neue',Arial,sans-serif; font-weight: 600; font-size: 22px; letter-spacing: 6px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg viewBox="0 0 1000 1000" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <radialGradient id="face" cx="50%" cy="42%" r="66%">
+        <stop offset="0%" stop-color="#12141a" /><stop offset="62%" stop-color="#0a0b0f" /><stop offset="100%" stop-color="#020203" />
+      </radialGradient>
+      <linearGradient id="bezel" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#e9edf0" /><stop offset="18%" stop-color="#a7adb4" /><stop offset="50%" stop-color="#4c5157" /><stop offset="82%" stop-color="#9aa0a7" /><stop offset="100%" stop-color="#d7dbdf" />
+      </linearGradient>
+      <linearGradient id="bezel2" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#34373c" /><stop offset="50%" stop-color="#0d0e11" /><stop offset="100%" stop-color="#34373c" />
+      </linearGradient>
+      <radialGradient id="dotglow" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#ff2233" stop-opacity="0.55" /><stop offset="70%" stop-color="#ff2233" stop-opacity="0.10" /><stop offset="100%" stop-color="#ff2233" stop-opacity="0" />
+      </radialGradient>
+      <radialGradient id="dot" cx="42%" cy="38%" r="70%">
+        <stop offset="0%" stop-color="#ff8a90" /><stop offset="45%" stop-color="#e5001c" /><stop offset="100%" stop-color="#9c0012" />
+      </radialGradient>
+    </defs>
+
+    <!-- bezel + face -->
+    <circle cx="500" cy="500" r="498" fill="url(#bezel)" />
+    <circle cx="500" cy="500" r="470" fill="url(#bezel2)" />
+    <circle cx="500" cy="500" r="452" fill="url(#face)" />
+
+    <!-- g rings (0.5 / 1.0 / 1.5 g) -->
+    <circle class="ring" cx="500" cy="500" r="140" />
+    <circle class="ring" cx="500" cy="500" r="280" />
+    <circle class="ring" cx="500" cy="500" r="420" stroke="#2b3a3a" />
+    <text class="rlab" x="512" y="368" text-anchor="start">0.5</text>
+    <text class="rlab" x="512" y="228" text-anchor="start">1.0</text>
+    <text class="rlab" x="512" y="92"  text-anchor="start">1.5</text>
+
+    <!-- crosshair -->
+    <line x1="500" y1="60" x2="500" y2="940" stroke="#1a2226" stroke-width="2" />
+    <line x1="60" y1="500" x2="940" y2="500" stroke="#1a2226" stroke-width="2" />
+
+    <!-- axis labels -->
+    <text class="axlab" x="500" y="120" text-anchor="middle">ACCEL</text>
+    <text class="axlab" x="500" y="900" text-anchor="middle">BRAKE</text>
+    <text class="axlab" x="96"  y="510" text-anchor="middle" transform="rotate(-90 96 500)">LEFT</text>
+    <text class="axlab" x="904" y="510" text-anchor="middle" transform="rotate(90 904 500)">RIGHT</text>
+
+    <!-- peak marker + peak-hold ring -->
+    <circle id="peakRing" cx="500" cy="500" r="0" fill="none" stroke="#ffb000" stroke-width="2" stroke-dasharray="4 8" opacity="0.5" />
+    <circle id="peakDot" cx="500" cy="500" r="9" fill="none" stroke="#ffb000" stroke-width="4" />
+
+    <!-- comet trail (filled in by JS) -->
+    <g id="trail"></g>
+
+    <!-- live dot -->
+    <circle id="glow" cx="500" cy="500" r="70" fill="url(#dotglow)" />
+    <circle id="ball" cx="500" cy="500" r="22" fill="url(#dot)" />
+
+    <!-- digital readouts -->
+    <text class="dlab" x="150" y="470" text-anchor="middle">LAT</text>
+    <text id="latV" class="dval" x="150" y="530" text-anchor="middle" font-size="52" fill="#2ce8d8">0.00</text>
+    <text class="dlab" x="850" y="470" text-anchor="middle">LON</text>
+    <text id="lonV" class="dval" x="850" y="530" text-anchor="middle" font-size="52" fill="#2ce8d8">0.00</text>
+
+    <text class="dlab" x="500" y="690" text-anchor="middle" fill="#8a6a1e">PEAK</text>
+    <text id="peakV" class="dval" x="500" y="756" text-anchor="middle" font-size="66" fill="#ffb000">0.00</text>
+    <text class="unit" x="500" y="800" text-anchor="middle" font-size="26">G</text>
+
+    <text class="brand" x="500" y="892" text-anchor="middle">944 S · SPORT CHRONO</text>
+    <text x="60" y="944" font-family="'Rajdhani',Arial" font-size="18" fill="#3a4a4a" letter-spacing="2">SIM</text>
+  </svg>
+</div>
+<script>
+(function () {
+  var NS = "http://www.w3.org/2000/svg";
+  var SCALE = 280;            // px per g (1.5 g -> r420)
+  var ball = document.getElementById("ball"), glow = document.getElementById("glow");
+  var latV = document.getElementById("latV"), lonV = document.getElementById("lonV");
+  var peakV = document.getElementById("peakV"), peakDot = document.getElementById("peakDot"), peakRing = document.getElementById("peakRing");
+  var trailG = document.getElementById("trail");
+  var trail = [], peak = 0, peakDecay = 0;
+
+  // build reusable trail dots
+  var TN = 34, dots = [];
+  for (var i = 0; i < TN; i++) {
+    var c = document.createElementNS(NS, "circle");
+    c.setAttribute("r", 6 + i * 0.35); c.setAttribute("fill", "#ff2233");
+    c.setAttribute("opacity", 0); trailG.appendChild(c); dots.push(c);
+  }
+
+  // A simulated hot-lap sequence: waypoints [t, lateralG(+right), longG(+accel)]
+  var wp = [
+    [0.0,  0.0,  0.05], [1.4, 0.0, -1.10],   // straight -> hard braking
+    [2.9,  0.95, -0.35],[4.3, 1.02, 0.15],   // trail-brake into right, apex
+    [5.7,  0.30, 0.70], [6.6, 0.0, 0.15],    // power out -> straight
+    [7.2,  0.0, -1.05], [8.6, -0.98, -0.30], // brake into left
+    [10.0, -1.04, 0.15],[11.4, -0.28, 0.68], // apex left, power out
+    [12.0, 0.0, 0.05]
+  ];
+  var CYCLE = 12.0;
+  function smooth(a, b, t) { t = t * t * (3 - 2 * t); return a + (b - a) * t; }
+  function sample(tt) {
+    for (var i = 0; i < wp.length - 1; i++) {
+      if (tt >= wp[i][0] && tt <= wp[i + 1][0]) {
+        var f = (tt - wp[i][0]) / (wp[i + 1][0] - wp[i][0]);
+        return [smooth(wp[i][1], wp[i + 1][1], f), smooth(wp[i][2], wp[i + 1][2], f)];
+      }
+    }
+    return [0, 0];
+  }
+
+  var t0 = performance.now();
+  function frame(now) {
+    var tt = ((now - t0) / 1000) % CYCLE;
+    var g = sample(tt);
+    // tiny jitter so it feels alive
+    var lat = g[0] + (Math.random() - 0.5) * 0.03;
+    var lon = g[1] + (Math.random() - 0.5) * 0.03;
+    var x = 500 + lat * SCALE, y = 500 - lon * SCALE;
+    ball.setAttribute("cx", x); ball.setAttribute("cy", y);
+    glow.setAttribute("cx", x); glow.setAttribute("cy", y);
+
+    // trail
+    trail.push([x, y]); if (trail.length > TN) trail.shift();
+    for (var i = 0; i < trail.length; i++) {
+      var d = dots[i], p = trail[i];
+      d.setAttribute("cx", p[0]); d.setAttribute("cy", p[1]);
+      d.setAttribute("opacity", (i / TN) * 0.5);
+    }
+
+    // peak hold w/ slow decay
+    var mag = Math.sqrt(lat * lat + lon * lon);
+    if (mag > peak) { peak = mag; peakDecay = now;
+      peakDot.setAttribute("cx", x); peakDot.setAttribute("cy", y);
+      peakRing.setAttribute("r", mag * SCALE);
+    }
+    if (now - peakDecay > 2600) peak = Math.max(mag, peak - 0.004);
+
+    latV.textContent = (lat >= 0 ? "" : "-") + Math.abs(lat).toFixed(2);
+    lonV.textContent = (lon >= 0 ? "" : "-") + Math.abs(lon).toFixed(2);
+    peakV.textContent = peak.toFixed(2);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
