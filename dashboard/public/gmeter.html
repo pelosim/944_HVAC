@@ -157,10 +157,12 @@
     ctx.fillStyle = C.amberHi; ctx.beginPath(); ctx.arc(CX-3, CY-3, 4.5, 0, 6.2832); ctx.fill();
 
     // live magnitude
+    // "0.00" at 62px monospace is ~148 wide; place the unit clear of its right
+    // edge and centre the pair (number + gap + unit) on 500.
     var mag = Math.sqrt(lat*lat + lon*lon);
-    glowText(mag.toFixed(2), 478, 876, "bold 62px ui-monospace,Menlo,monospace", C.vfd, 14);
+    glowText(mag.toFixed(2), 483, 876, "bold 62px ui-monospace,Menlo,monospace", C.vfd, 14);
     ctx.font = "700 30px system-ui,'Helvetica Neue',Arial,sans-serif";
-    ctx.fillStyle = C.mid; ctx.textAlign = "left"; ctx.fillText("G", 540, 876);
+    ctx.fillStyle = C.mid; ctx.textAlign = "left"; ctx.fillText("G", 571, 876);
     ctx.textAlign = "center";
 
     if (showFps) {
