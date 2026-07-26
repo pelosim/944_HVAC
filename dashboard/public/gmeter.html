@@ -19,22 +19,26 @@
 <div id="wrap"><canvas id="cv"></canvas></div>
 <script>
 /* ─────────────────────────────────────────────────────────────
-   944S G-meter — side-profile silhouette attitude display.
+   944S G-meter — attitude nav-ball, tuned for pitch/roll clarity.
 
-   A line-art 944 profile (traced from the classic silhouette: wedge nose,
-   pop-up headlight bulge, fastback hatch, ducktail, phone-dial wheels,
-   PORSCHE rocker script) pitches with longitudinal G over a fixed teal
-   ground datum, and slides with speed-lines under lateral G. Big combined-G
-   number + LEAN/PITCH shelf below, PK on top.
+   Straight-on view like a real aircraft attitude indicator (that's the
+   orientation flight instruments use because it's the clearest read):
+   - horizon = bright glowing line across the ball
+   - pitch ladder: solid teal above (sky), dashed amber below (ground),
+     labeled every 30° — brake hard and amber floods the ball
+   - fixed roll tick arc with a moving amber bank pointer
+   - fixed white aircraft reference at center
+   - big combined-G + LEAN/PITCH shelf below, PK on top
+   True apparent-gravity attitude — no exaggeration (1 g = 45°).
 
-   Canvas 2D, no WebGL (this Pi's V3D is flaky and the car is offline).
-   Drawn in a 1000x1000 design space. Add ?fps=1 for a frame-rate readout.
+   Canvas 2D, hand-rolled orthographic sphere. No WebGL (Pi V3D is flaky,
+   car is offline). 1000x1000 design space. ?fps=1 shows frame rate.
    ───────────────────────────────────────────────────────────── */
 (function () {
   var cv = document.getElementById("cv"), ctx = cv.getContext("2d"), K = 1;
   var C = { vfd:"#2ce8d8", vfdHi:"#8ffff2", amber:"#ffb000", ice:"#5cb8ff",
             red:"#ff3b30", text:"#eaf6f4", mid:"#8ea6a3" };
-  var S = 0.88, GROUND = 600, GY = GROUND - 80 * S;
+  var CX = 500, CY = 415, R = 250;
   var showFps = location.search.indexOf("fps") >= 0;
 
   function resize() {
@@ -44,58 +48,34 @@
   }
   window.addEventListener("resize", resize);
 
-  // ── the car (local coords: x 0=nose..946=tail, y negative = up, 0 = ground) ──
-  function body(c) {
-    c.beginPath();
-    c.moveTo(6,-34); c.lineTo(0,-50);
-    c.quadraticCurveTo(4,-62,16,-64);        // nose tip
-    c.quadraticCurveTo(70,-76,112,-86);      // hood
-    c.quadraticCurveTo(150,-95,192,-92);     // pop-up headlight bulge
-    c.quadraticCurveTo(255,-97,320,-105);    // cowl
-    c.lineTo(452,-186);                      // windshield / A-pillar
-    c.quadraticCurveTo(510,-206,566,-204);   // roof
-    c.quadraticCurveTo(650,-194,706,-170);   // fastback upper
-    c.quadraticCurveTo(788,-136,842,-124);   // hatch glass to deck
-    c.quadraticCurveTo(876,-130,898,-131);   // ducktail kick
-    c.lineTo(906,-114);
-    c.quadraticCurveTo(922,-98,944,-90);     // tail upper
-    c.lineTo(946,-56);                       // bumper face
-    c.quadraticCurveTo(944,-38,916,-34);
-    c.lineTo(884,-30); c.lineTo(877,-30);
-    var i, th;
-    for (i = 0; i <= 12; i++) { th = Math.PI*i/12; c.lineTo(793+84*Math.cos(th), -30-84*Math.sin(th)); }  // rear arch
-    c.lineTo(320,-30);                       // rocker
-    for (i = 0; i <= 12; i++) { th = Math.PI*i/12; c.lineTo(236+84*Math.cos(th), -30-84*Math.sin(th)); }  // front arch
-    c.lineTo(60,-30);
-    c.quadraticCurveTo(24,-30,6,-34);        // front valance
-    c.stroke();
+  // ── sphere geometry ────────────────────────────────────────
+  function P(la, lo) { var a = la*Math.PI/180, b = lo*Math.PI/180, c = Math.cos(a);
+                       return [c*Math.cos(b), Math.sin(a), c*Math.sin(b)]; }
+  function ring(la, step) { var r = []; for (var lo = 0; lo <= 360; lo += step) r.push(P(la, lo)); return r; }
+  var skyLadder = [], groundLadder = [], equator = ring(0, 6), mers = [];
+  [15,30,45,60,75].forEach(function (la) { skyLadder.push(ring(la, 6)); groundLadder.push(ring(-la, 6)); });
+  [45,90,135].forEach(function (lo) {
+    var m = []; for (var la = -90; la <= 90; la += 6) m.push(P(la, lo)); mers.push(m);
+  });
+
+  // pitch about X then roll about Z, orthographic straight-on projection
+  var cr = 1, sr = 0, cp = 1, sp = 0;
+  function xf(p) {
+    var y1 = p[1]*cp - p[2]*sp, z1 = p[1]*sp + p[2]*cp;
+    var x2 = p[0]*cr - y1*sr,  y2 = p[0]*sr + y1*cr;
+    return [CX + x2*R, CY - y2*R, z1];
   }
-  function details(c) {
-    c.beginPath();
-    c.moveTo(332,-104); c.quadraticCurveTo(500,-112,662,-114);  // beltline
-    c.moveTo(344,-110); c.lineTo(456,-180);                     // DLO
-    c.quadraticCurveTo(540,-194,604,-186);
-    c.quadraticCurveTo(650,-166,676,-146);
-    c.quadraticCurveTo(668,-124,660,-116);
-    c.moveTo(578,-188); c.lineTo(586,-112);                     // B-pillar
-    c.moveTo(590,-108); c.quadraticCurveTo(596,-70,588,-30);    // door shut
-    c.moveTo(600,-98);  c.lineTo(626,-100);                     // handle
-    c.moveTo(128,-88);  c.lineTo(198,-91);                      // headlight seam
-    c.moveTo(66,-44);   c.lineTo(104,-46);                      // side marker
-    c.moveTo(908,-96);  c.lineTo(940,-84);                      // tail band
-    c.moveTo(884,-22);  c.lineTo(908,-22);                      // exhaust
-    c.moveTo(838,-118); c.lineTo(892,-117);                     // spoiler underline
-    c.stroke();
-    c.beginPath(); c.moveTo(446,-126); c.lineTo(434,-142);      // mirror
-    c.lineTo(454,-146); c.lineTo(460,-130); c.closePath(); c.fill();
-  }
-  function wheel(c, cx) {
-    c.lineWidth = 3.4; c.beginPath(); c.arc(cx,-54,54,0,6.2832); c.stroke();
-    c.lineWidth = 2.4; c.beginPath(); c.arc(cx,-54,34,0,6.2832); c.stroke();
-    c.beginPath(); c.arc(cx,-54,6,0,6.2832); c.fill();
-    c.lineWidth = 1.8;
-    for (var k = 0; k < 5; k++) { var a = k*1.2566+0.6;
-      c.beginPath(); c.arc(cx+21*Math.cos(a), -54+21*Math.sin(a), 7, 0, 6.2832); c.stroke(); }
+  function front(list) {           // stroke only front-facing segments
+    ctx.beginPath();
+    for (var i = 0; i < list.length; i++) {
+      var pts = list[i];
+      for (var j = 0; j < pts.length - 1; j++) {
+        var a = xf(pts[j]), b = xf(pts[j+1]);
+        if ((a[2] + b[2]) <= 0) continue;
+        ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]);
+      }
+    }
+    ctx.stroke();
   }
 
   // ── live data (backend) with simulated fallback ────────────
@@ -137,6 +117,9 @@
     if (mag > peak) { peak = mag; peakT = now; }
     if (now - peakT > 2600) peak = Math.max(mag, peak - 0.004);
 
+    var roll = Math.atan(lat), pitch = Math.atan(lon);
+    cr = Math.cos(roll); sr = Math.sin(roll); cp = Math.cos(pitch); sp = Math.sin(pitch);
+
     ctx.setTransform(K, 0, 0, K, 0, 0);
     ctx.clearRect(0, 0, 1000, 1000);
     ctx.save();
@@ -146,46 +129,78 @@
     fg.addColorStop(0, "#0d1014"); fg.addColorStop(0.62, "#080a0d"); fg.addColorStop(1, "#020304");
     ctx.fillStyle = fg; ctx.fillRect(0, 0, 1000, 1000);
 
-    ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
-    ctx.letterSpacing = "13px";
-    ctx.font = "700 30px system-ui,'Helvetica Neue',Arial,sans-serif";
-    ctx.fillStyle = "#d9dde1"; ctx.globalAlpha = 0.85; ctx.fillText("PORSCHE", 506, 310); ctx.globalAlpha = 1;
-    ctx.letterSpacing = "0px";
+    ctx.lineCap = "round"; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+
+    // meridians — dim structure only
+    ctx.strokeStyle = C.vfd; ctx.globalAlpha = 0.18; ctx.lineWidth = 2;
+    front(mers);
+
+    // ground ladder — dashed amber (below horizon)
+    ctx.globalAlpha = 0.85; ctx.strokeStyle = C.amber; ctx.lineWidth = 3;
+    ctx.setLineDash([16, 12]);
+    front(groundLadder);
+    ctx.setLineDash([]);
+
+    // sky ladder — solid teal (above horizon)
+    ctx.strokeStyle = C.vfd;
+    front(skyLadder);
+
+    // horizon — the hero line, with glow
+    ctx.globalAlpha = 0.14; ctx.strokeStyle = C.vfdHi; ctx.lineWidth = 14;
+    front([equator]);
+    ctx.globalAlpha = 1; ctx.lineWidth = 5.5;
+    front([equator]);
+
+    // ladder labels (30/60, both hemispheres) ride their rungs
+    ctx.font = "bold 26px ui-monospace, Menlo, monospace";
+    [[30, C.vfd], [60, C.vfd], [-30, C.amber], [-60, C.amber]].forEach(function (L) {
+      var la = L[0]*Math.PI/180;
+      var p = xf([Math.cos(la)*0.966, Math.sin(la), Math.cos(la)*0.259]);
+      if (p[2] > 0.05) { ctx.fillStyle = L[1]; ctx.globalAlpha = 0.85;
+        ctx.fillText(Math.abs(L[0]).toString(), p[0] + 30, p[1] + 9); }
+    });
+    ctx.globalAlpha = 1;
+
+    // sphere limb
+    ctx.strokeStyle = C.vfd; ctx.globalAlpha = 0.3; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(CX, CY, R, 0, 6.2832); ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    // roll arc: fixed ticks, moving amber bank pointer
+    var i, a2;
+    ctx.strokeStyle = "#7f8a90"; ctx.lineWidth = 3;
+    ctx.beginPath();
+    for (i = -60; i <= 60; i += 15) {
+      a2 = i*Math.PI/180;
+      var r1 = 268, r2 = (i === 0) ? 296 : (i % 45 === 0 ? 290 : 282);
+      ctx.moveTo(CX + r1*Math.sin(a2), CY - r1*Math.cos(a2));
+      ctx.lineTo(CX + r2*Math.sin(a2), CY - r2*Math.cos(a2));
+    }
+    ctx.stroke();
+    ctx.font = "bold 22px ui-monospace, Menlo, monospace"; ctx.fillStyle = "#7f8a90";
+    [[-45,"45"],[45,"45"]].forEach(function (T) {
+      a2 = T[0]*Math.PI/180;
+      ctx.fillText(T[1], CX + 312*Math.sin(a2), CY - 312*Math.cos(a2) + 8);
+    });
+    // pointer at the bank angle
+    a2 = roll; var px = CX + 258*Math.sin(a2), py = CY - 258*Math.cos(a2);
+    ctx.save(); ctx.translate(px, py); ctx.rotate(a2);
+    ctx.fillStyle = C.amber;
+    ctx.beginPath(); ctx.moveTo(0, 6); ctx.lineTo(-14, -22); ctx.lineTo(14, -22); ctx.closePath(); ctx.fill();
+    ctx.restore();
+
+    // fixed aircraft reference
+    ctx.strokeStyle = C.text; ctx.lineWidth = 6; ctx.globalAlpha = 0.95;
+    ctx.beginPath();
+    ctx.moveTo(CX - 120, CY); ctx.lineTo(CX - 44, CY); ctx.lineTo(CX - 44, CY + 16);
+    ctx.moveTo(CX + 120, CY); ctx.lineTo(CX + 44, CY); ctx.lineTo(CX + 44, CY + 16);
+    ctx.stroke();
+    ctx.beginPath(); ctx.arc(CX, CY, 6, 0, 6.2832); ctx.fillStyle = C.text; ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // PK
     ctx.font = "bold 28px ui-monospace, Menlo, monospace";
     ctx.fillStyle = C.amber; ctx.fillText("PK " + peak.toFixed(2), 500, 100);
-
-    // ground datum
-    ctx.strokeStyle = C.vfd; ctx.globalAlpha = 0.12; ctx.lineWidth = 9;
-    ctx.beginPath(); ctx.moveTo(120, GROUND); ctx.lineTo(880, GROUND); ctx.stroke();
-    ctx.globalAlpha = 0.9; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.moveTo(120, GROUND); ctx.lineTo(880, GROUND); ctx.stroke();
-    ctx.globalAlpha = 0.35; ctx.lineWidth = 2; ctx.beginPath();
-    for (var i = 0; i <= 16; i++) { ctx.moveTo(140+i*45, GROUND); ctx.lineTo(140+i*45, GROUND+10); }
-    ctx.stroke(); ctx.globalAlpha = 1;
-
-    // lateral speed-lines
-    if (Math.abs(lat) > 0.28) {
-      var dir = lat > 0 ? 1 : -1, len = 50 + Math.abs(lat)*70;
-      ctx.strokeStyle = C.vfd; ctx.globalAlpha = 0.25 + 0.35*Math.min(1, Math.abs(lat)); ctx.lineWidth = 3;
-      ctx.beginPath();
-      for (var s2 = 0; s2 < 3; s2++) { var yy = 452+s2*34, x0 = dir > 0 ? 150 : 850;
-        ctx.moveTo(x0, yy); ctx.lineTo(x0+dir*len, yy); }
-      ctx.stroke(); ctx.globalAlpha = 1;
-    }
-
-    // the car — pitches with lon G (nose dives under braking), slides with lat G
-    var th = 0.35*Math.atan(lon), slide = lat*40;
-    ctx.save();
-    ctx.translate(500+slide, GY); ctx.rotate(th); ctx.scale(S, S); ctx.translate(-480, 80);
-    ctx.strokeStyle = C.text; ctx.fillStyle = C.text; ctx.lineCap = "round"; ctx.lineJoin = "round";
-    ctx.lineWidth = 3.4; body(ctx);
-    ctx.lineWidth = 2.2; details(ctx);
-    wheel(ctx, 236); wheel(ctx, 793);
-    ctx.letterSpacing = "10px";
-    ctx.font = "700 28px system-ui,'Helvetica Neue',Arial,sans-serif";
-    ctx.globalAlpha = 0.9; ctx.textAlign = "center"; ctx.fillText("PORSCHE", 505, -40); ctx.globalAlpha = 1;
-    ctx.letterSpacing = "0px";
-    ctx.restore();
 
     // data shelf
     ctx.strokeStyle = "#1c2429"; ctx.lineWidth = 2;
@@ -193,7 +208,7 @@
     ctx.font = "bold 22px system-ui,'Helvetica Neue',Arial,sans-serif";
     ctx.fillStyle = C.mid; ctx.fillText("LEAN", 285, 796); ctx.fillText("PITCH", 715, 796);
     ctx.fillStyle = "#5d6f74"; ctx.fillText("G-FORCE", 500, 796);
-    var rd = Math.atan(lat)*57.2958, pd = Math.atan(lon)*57.2958;
+    var rd = roll*57.2958, pd = pitch*57.2958;
     ctx.font = "bold 40px ui-monospace, Menlo, 'DejaVu Sans Mono', monospace";
     ctx.fillStyle = C.ice; ctx.fillText((rd >= 0 ? "R" : "L") + Math.abs(rd).toFixed(0) + "°", 285, 852);
     ctx.fillStyle = C.red; ctx.fillText((pd >= 0 ? "+" : "−") + Math.abs(pd).toFixed(0) + "°", 715, 852);
@@ -205,7 +220,7 @@
       fAcc += now - fT; fT = now; fN++;
       if (fAcc >= 500) { fps = Math.round(1000 / (fAcc / fN)); fAcc = 0; fN = 0; }
       ctx.font = "bold 26px ui-monospace, monospace"; ctx.fillStyle = "#3aff8c";
-      ctx.textAlign = "left"; ctx.fillText(fps + " FPS", 232, 700); ctx.textAlign = "center";
+      ctx.textAlign = "left"; ctx.fillText(fps + " FPS", 150, 706); ctx.textAlign = "center";
     }
     ctx.restore();
 
