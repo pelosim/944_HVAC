@@ -19,22 +19,22 @@
 <div id="wrap"><canvas id="cv"></canvas></div>
 <script>
 /* ─────────────────────────────────────────────────────────────
-   944S vector nav-ball G-meter.
+   944S G-meter — side-profile silhouette attitude display.
 
-   Canvas 2D with hand-rolled 3D — deliberately NOT WebGL/three.js:
-   this Pi's V3D stack already proved flaky (SVG feDropShadow silently
-   fails), the car is usually offline so no CDN, and at 480x480 a few
-   hundred line segments is trivial for Skia. Vector line-drawing is
-   also the authentic period look.
+   A line-art 944 profile (traced from the classic silhouette: wedge nose,
+   pop-up headlight bulge, fastback hatch, ducktail, phone-dial wheels,
+   PORSCHE rocker script) pitches with longitudinal G over a fixed teal
+   ground datum, and slides with speed-lines under lateral G. Big combined-G
+   number + LEAN/PITCH shelf below, PK on top.
 
-   Drawn in a 1000x1000 design space, scaled to the canvas each frame.
-   Add ?fps=1 to the URL to show a frame-rate readout.
+   Canvas 2D, no WebGL (this Pi's V3D is flaky and the car is offline).
+   Drawn in a 1000x1000 design space. Add ?fps=1 for a frame-rate readout.
    ───────────────────────────────────────────────────────────── */
 (function () {
   var cv = document.getElementById("cv"), ctx = cv.getContext("2d"), K = 1;
   var C = { vfd:"#2ce8d8", vfdHi:"#8ffff2", amber:"#ffb000", ice:"#5cb8ff",
-            red:"#ff3b30", text:"#eaf6f4", mid:"#8ea6a3", dim:"#46565a" };
-  var CX = 500, CY = 415, RAD = 250, AXL = RAD * 1.10;
+            red:"#ff3b30", text:"#eaf6f4", mid:"#8ea6a3" };
+  var S = 0.88, GROUND = 600, GY = GROUND - 80 * S;
   var showFps = location.search.indexOf("fps") >= 0;
 
   function resize() {
@@ -44,63 +44,58 @@
   }
   window.addEventListener("resize", resize);
 
-  // ── sphere geometry (unit sphere) ──────────────────────────
-  function P(la, lo) { var a = la*Math.PI/180, b = lo*Math.PI/180, c = Math.cos(a);
-                       return [c*Math.cos(b), Math.sin(a), c*Math.sin(b)]; }
-  var rings = [], equator = [], mers = [];
-  for (var la = -60; la <= 60; la += 30) {
-    var ring = []; for (var lo = 0; lo <= 360; lo += 10) ring.push(P(la, lo));
-    if (la === 0) equator = ring; else rings.push(ring);
+  // ── the car (local coords: x 0=nose..946=tail, y negative = up, 0 = ground) ──
+  function body(c) {
+    c.beginPath();
+    c.moveTo(6,-34); c.lineTo(0,-50);
+    c.quadraticCurveTo(4,-62,16,-64);        // nose tip
+    c.quadraticCurveTo(70,-76,112,-86);      // hood
+    c.quadraticCurveTo(150,-95,192,-92);     // pop-up headlight bulge
+    c.quadraticCurveTo(255,-97,320,-105);    // cowl
+    c.lineTo(452,-186);                      // windshield / A-pillar
+    c.quadraticCurveTo(510,-206,566,-204);   // roof
+    c.quadraticCurveTo(650,-194,706,-170);   // fastback upper
+    c.quadraticCurveTo(788,-136,842,-124);   // hatch glass to deck
+    c.quadraticCurveTo(876,-130,898,-131);   // ducktail kick
+    c.lineTo(906,-114);
+    c.quadraticCurveTo(922,-98,944,-90);     // tail upper
+    c.lineTo(946,-56);                       // bumper face
+    c.quadraticCurveTo(944,-38,916,-34);
+    c.lineTo(884,-30); c.lineTo(877,-30);
+    var i, th;
+    for (i = 0; i <= 12; i++) { th = Math.PI*i/12; c.lineTo(793+84*Math.cos(th), -30-84*Math.sin(th)); }  // rear arch
+    c.lineTo(320,-30);                       // rocker
+    for (i = 0; i <= 12; i++) { th = Math.PI*i/12; c.lineTo(236+84*Math.cos(th), -30-84*Math.sin(th)); }  // front arch
+    c.lineTo(60,-30);
+    c.quadraticCurveTo(24,-30,6,-34);        // front valance
+    c.stroke();
   }
-  for (var lo2 = 0; lo2 < 360; lo2 += 45) {
-    var mer = []; for (var la2 = -90; la2 <= 90; la2 += 10) mer.push(P(la2, lo2));
-    mers.push(mer);
+  function details(c) {
+    c.beginPath();
+    c.moveTo(332,-104); c.quadraticCurveTo(500,-112,662,-114);  // beltline
+    c.moveTo(344,-110); c.lineTo(456,-180);                     // DLO
+    c.quadraticCurveTo(540,-194,604,-186);
+    c.quadraticCurveTo(650,-166,676,-146);
+    c.quadraticCurveTo(668,-124,660,-116);
+    c.moveTo(578,-188); c.lineTo(586,-112);                     // B-pillar
+    c.moveTo(590,-108); c.quadraticCurveTo(596,-70,588,-30);    // door shut
+    c.moveTo(600,-98);  c.lineTo(626,-100);                     // handle
+    c.moveTo(128,-88);  c.lineTo(198,-91);                      // headlight seam
+    c.moveTo(66,-44);   c.lineTo(104,-46);                      // side marker
+    c.moveTo(908,-96);  c.lineTo(940,-84);                      // tail band
+    c.moveTo(884,-22);  c.lineTo(908,-22);                      // exhaust
+    c.moveTo(838,-118); c.lineTo(892,-117);                     // spoiler underline
+    c.stroke();
+    c.beginPath(); c.moveTo(446,-126); c.lineTo(434,-142);      // mirror
+    c.lineTo(454,-146); c.lineTo(460,-130); c.closePath(); c.fill();
   }
-
-  // Fixed 3/4 viewing angle so all three axes stay visible at rest
-  // (a spinning ball would rob the triad of its meaning).
-  var VY = 28*Math.PI/180, VP = 16*Math.PI/180;
-  var cvy = Math.cos(VY), svy = Math.sin(VY), cvp = Math.cos(VP), svp = Math.sin(VP);
-
-  var cr = 1, sr = 0, cp = 1, sp = 0;
-  function xf(p) {
-    var x = p[0], y = p[1], z = p[2];
-    var y1 = y*cp - z*sp,  z1 = y*sp + z*cp;      // G pitch about X
-    var x2 = x*cr - y1*sr, y2 = x*sr + y1*cr;     // G roll about Z
-    var x3 = x2*cvy + z1*svy, z3 = -x2*svy + z1*cvy;   // view yaw
-    var y4 = y2*cvp - z3*svp, z4 = y2*svp + z3*cvp;    // view pitch
-    return [CX + x3*RAD, CY - y4*RAD, z4];
-  }
-
-  function batch(list, front) {
-    ctx.beginPath();
-    for (var i = 0; i < list.length; i++) {
-      var pts = list[i];
-      for (var j = 0; j < pts.length - 1; j++) {
-        var a = xf(pts[j]), b = xf(pts[j+1]);
-        if (((a[2] + b[2]) > 0) !== front) continue;
-        ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]);
-      }
-    }
-    ctx.stroke();
-  }
-
-  function axis(v, color, label) {
-    var pos = xf(v), neg = xf([-v[0], -v[1], -v[2]]);
-    // negative half, faint
-    ctx.globalAlpha = 0.22; ctx.strokeStyle = color; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.moveTo(CX, CY); ctx.lineTo(neg[0], neg[1]); ctx.stroke();
-    // positive half — brighter when pointing toward the viewer
-    var near = pos[2] > 0;
-    ctx.globalAlpha = near ? 1 : 0.5; ctx.lineWidth = near ? 6 : 4;
-    ctx.beginPath(); ctx.moveTo(CX, CY); ctx.lineTo(pos[0], pos[1]); ctx.stroke();
-    ctx.fillStyle = color; ctx.beginPath();
-    ctx.arc(pos[0], pos[1], near ? 11 : 8, 0, 6.2832); ctx.fill();
-    ctx.globalAlpha = near ? 1 : 0.55;
-    ctx.font = "bold 30px system-ui, 'Helvetica Neue', Arial, sans-serif";
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillText(label, pos[0] + (pos[0] - CX) * 0.14, pos[1] + (pos[1] - CY) * 0.14 - 2);
-    ctx.globalAlpha = 1;
+  function wheel(c, cx) {
+    c.lineWidth = 3.4; c.beginPath(); c.arc(cx,-54,54,0,6.2832); c.stroke();
+    c.lineWidth = 2.4; c.beginPath(); c.arc(cx,-54,34,0,6.2832); c.stroke();
+    c.beginPath(); c.arc(cx,-54,6,0,6.2832); c.fill();
+    c.lineWidth = 1.8;
+    for (var k = 0; k < 5; k++) { var a = k*1.2566+0.6;
+      c.beginPath(); c.arc(cx+21*Math.cos(a), -54+21*Math.sin(a), 7, 0, 6.2832); c.stroke(); }
   }
 
   // ── live data (backend) with simulated fallback ────────────
@@ -142,74 +137,75 @@
     if (mag > peak) { peak = mag; peakT = now; }
     if (now - peakT > 2600) peak = Math.max(mag, peak - 0.004);
 
-    var roll = Math.atan(lat), pitch = Math.atan(lon);
-    cr = Math.cos(roll); sr = Math.sin(roll); cp = Math.cos(pitch); sp = Math.sin(pitch);
-
     ctx.setTransform(K, 0, 0, K, 0, 0);
     ctx.clearRect(0, 0, 1000, 1000);
     ctx.save();
     ctx.beginPath(); ctx.arc(500, 500, 452, 0, 6.2832); ctx.clip();
 
-    var fg = ctx.createRadialGradient(500, 420, 40, 500, 500, 452);
+    var fg = ctx.createRadialGradient(500, 430, 40, 500, 500, 452);
     fg.addColorStop(0, "#0d1014"); fg.addColorStop(0.62, "#080a0d"); fg.addColorStop(1, "#020304");
     ctx.fillStyle = fg; ctx.fillRect(0, 0, 1000, 1000);
 
-    // sphere — back hemisphere first, then front
-    ctx.lineCap = "round";
-    ctx.strokeStyle = C.vfd; ctx.lineWidth = 2; ctx.globalAlpha = 0.16;
-    batch(rings, false); batch(mers, false);
-    ctx.globalAlpha = 0.85; batch(rings, true); batch(mers, true);
-    // equator gets emphasis — it's the tilt datum
-    ctx.strokeStyle = C.vfdHi; ctx.lineWidth = 3; ctx.globalAlpha = 0.2;
-    batch([equator], false);
-    ctx.globalAlpha = 1; ctx.lineWidth = 4; batch([equator], true);
-    ctx.globalAlpha = 1;
+    ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+    ctx.letterSpacing = "13px";
+    ctx.font = "700 30px system-ui,'Helvetica Neue',Arial,sans-serif";
+    ctx.fillStyle = "#d9dde1"; ctx.globalAlpha = 0.85; ctx.fillText("PORSCHE", 506, 310); ctx.globalAlpha = 1;
+    ctx.letterSpacing = "0px";
+    ctx.font = "bold 28px ui-monospace, Menlo, monospace";
+    ctx.fillStyle = C.amber; ctx.fillText("PK " + peak.toFixed(2), 500, 100);
 
-    // 3-axis anchor (world/gravity frame)
-    axis([0, 1, 0], C.amber, "U");
-    axis([1, 0, 0], C.ice,   "R");
-    axis([0, 0, 1], C.red,   "F");
+    // ground datum
+    ctx.strokeStyle = C.vfd; ctx.globalAlpha = 0.12; ctx.lineWidth = 9;
+    ctx.beginPath(); ctx.moveTo(120, GROUND); ctx.lineTo(880, GROUND); ctx.stroke();
+    ctx.globalAlpha = 0.9; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(120, GROUND); ctx.lineTo(880, GROUND); ctx.stroke();
+    ctx.globalAlpha = 0.35; ctx.lineWidth = 2; ctx.beginPath();
+    for (var i = 0; i <= 16; i++) { ctx.moveTo(140+i*45, GROUND); ctx.lineTo(140+i*45, GROUND+10); }
+    ctx.stroke(); ctx.globalAlpha = 1;
 
-    // fixed vehicle reference — screen-locked, so "me" vs "world" stays clear
-    ctx.strokeStyle = C.text; ctx.lineWidth = 4; ctx.globalAlpha = 0.95;
-    ctx.beginPath();
-    ctx.moveTo(CX - 118, CY); ctx.lineTo(CX - 46, CY);
-    ctx.moveTo(CX + 46, CY);  ctx.lineTo(CX + 118, CY);
-    ctx.stroke();
-    ctx.beginPath(); ctx.arc(CX, CY, 5, 0, 6.2832); ctx.fillStyle = C.text; ctx.fill();
-    ctx.globalAlpha = 1;
+    // lateral speed-lines
+    if (Math.abs(lat) > 0.28) {
+      var dir = lat > 0 ? 1 : -1, len = 50 + Math.abs(lat)*70;
+      ctx.strokeStyle = C.vfd; ctx.globalAlpha = 0.25 + 0.35*Math.min(1, Math.abs(lat)); ctx.lineWidth = 3;
+      ctx.beginPath();
+      for (var s2 = 0; s2 < 3; s2++) { var yy = 452+s2*34, x0 = dir > 0 ? 150 : 850;
+        ctx.moveTo(x0, yy); ctx.lineTo(x0+dir*len, yy); }
+      ctx.stroke(); ctx.globalAlpha = 1;
+    }
 
-    // ── data shelf ──
+    // the car — pitches with lon G (nose dives under braking), slides with lat G
+    var th = 0.35*Math.atan(lon), slide = lat*40;
+    ctx.save();
+    ctx.translate(500+slide, GY); ctx.rotate(th); ctx.scale(S, S); ctx.translate(-480, 80);
+    ctx.strokeStyle = C.text; ctx.fillStyle = C.text; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.lineWidth = 3.4; body(ctx);
+    ctx.lineWidth = 2.2; details(ctx);
+    wheel(ctx, 236); wheel(ctx, 793);
+    ctx.letterSpacing = "10px";
+    ctx.font = "700 28px system-ui,'Helvetica Neue',Arial,sans-serif";
+    ctx.globalAlpha = 0.9; ctx.textAlign = "center"; ctx.fillText("PORSCHE", 505, -40); ctx.globalAlpha = 1;
+    ctx.letterSpacing = "0px";
+    ctx.restore();
+
+    // data shelf
     ctx.strokeStyle = "#1c2429"; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(215, 762); ctx.lineTo(785, 762); ctx.stroke();
-
-    ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
-    ctx.font = "bold 22px system-ui, 'Helvetica Neue', Arial, sans-serif";
-    ctx.fillStyle = C.mid;
-    ctx.fillText("LEAN", 285, 796);
-    ctx.fillText("PITCH", 715, 796);
+    ctx.font = "bold 22px system-ui,'Helvetica Neue',Arial,sans-serif";
+    ctx.fillStyle = C.mid; ctx.fillText("LEAN", 285, 796); ctx.fillText("PITCH", 715, 796);
     ctx.fillStyle = "#5d6f74"; ctx.fillText("G-FORCE", 500, 796);
-
-    var rd = roll * 57.2958, pd = pitch * 57.2958;
+    var rd = Math.atan(lat)*57.2958, pd = Math.atan(lon)*57.2958;
     ctx.font = "bold 40px ui-monospace, Menlo, 'DejaVu Sans Mono', monospace";
-    ctx.fillStyle = C.ice;
-    ctx.fillText((rd >= 0 ? "R" : "L") + Math.abs(rd).toFixed(0) + "°", 285, 852);
-    ctx.fillStyle = C.red;
-    ctx.fillText((pd >= 0 ? "+" : "−") + Math.abs(pd).toFixed(0) + "°", 715, 852);
-
-    ctx.font = "bold 108px ui-monospace, Menlo, 'DejaVu Sans Mono', monospace";
-    ctx.fillStyle = C.text; ctx.textBaseline = "middle";
-    ctx.fillText(mag.toFixed(2), 500, 868);
-
+    ctx.fillStyle = C.ice; ctx.fillText((rd >= 0 ? "R" : "L") + Math.abs(rd).toFixed(0) + "°", 285, 852);
+    ctx.fillStyle = C.red; ctx.fillText((pd >= 0 ? "+" : "−") + Math.abs(pd).toFixed(0) + "°", 715, 852);
+    ctx.font = "bold 106px ui-monospace, Menlo, 'DejaVu Sans Mono', monospace";
+    ctx.fillStyle = C.text; ctx.textBaseline = "middle"; ctx.fillText(mag.toFixed(2), 500, 872);
     ctx.textBaseline = "alphabetic";
-    ctx.font = "bold 28px ui-monospace, Menlo, monospace";
-    ctx.fillStyle = C.amber; ctx.fillText("PK " + peak.toFixed(2), 500, 96);
 
     if (showFps) {
       fAcc += now - fT; fT = now; fN++;
       if (fAcc >= 500) { fps = Math.round(1000 / (fAcc / fN)); fAcc = 0; fN = 0; }
       ctx.font = "bold 26px ui-monospace, monospace"; ctx.fillStyle = "#3aff8c";
-      ctx.textAlign = "left"; ctx.fillText(fps + " FPS", 232, 700);
+      ctx.textAlign = "left"; ctx.fillText(fps + " FPS", 232, 700); ctx.textAlign = "center";
     }
     ctx.restore();
 
