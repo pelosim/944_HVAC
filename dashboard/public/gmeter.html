@@ -52,10 +52,12 @@
   function P(la, lo) { var a = la*Math.PI/180, b = lo*Math.PI/180, c = Math.cos(a);
                        return [c*Math.cos(b), Math.sin(a), c*Math.sin(b)]; }
   function ring(la, step) { var r = []; for (var lo = 0; lo <= 360; lo += step) r.push(P(la, lo)); return r; }
-  var skyLadder = [], groundLadder = [], equator = ring(0, 6), mers = [];
-  [15,30,45,60,75].forEach(function (la) { skyLadder.push(ring(la, 6)); groundLadder.push(ring(-la, 6)); });
+  // 12° segments: chord error on r250 is ~1.4 design units (<1px on glass),
+  // and halving the segment count keeps the Pi at panel refresh.
+  var skyLadder = [], groundLadder = [], equator = ring(0, 8), mers = [];
+  [15,30,45,60,75].forEach(function (la) { skyLadder.push(ring(la, 12)); groundLadder.push(ring(-la, 12)); });
   [45,90,135].forEach(function (lo) {
-    var m = []; for (var la = -90; la <= 90; la += 6) m.push(P(la, lo)); mers.push(m);
+    var m = []; for (var la = -90; la <= 90; la += 10) m.push(P(la, lo)); mers.push(m);
   });
 
   // pitch about X then roll about Z, orthographic straight-on projection
