@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
 <title>944S · G-Force</title>
 <style>
+  /* Match clock.html bezel fit — keep these in sync with clock.html */
   :root { --fit: 94; --nudge-x: -10px; --nudge-y: 12px; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { width: 100%; height: 100%; background: #000; overflow: hidden; cursor: none; }
@@ -12,14 +13,10 @@
   svg { width: min(calc(var(--fit)*1vw), calc(var(--fit)*1vh));
         height: min(calc(var(--fit)*1vw), calc(var(--fit)*1vh));
         display: block; position: relative; left: var(--nudge-x); top: var(--nudge-y); }
-  .ring   { fill: none; stroke: #1f6f6a; stroke-width: 2; }
-  .rlab   { fill: #4b6f6c; font-family: 'Rajdhani','Helvetica Neue',Arial,sans-serif; font-weight: 600; font-size: 26px; }
-  .axlab  { fill: #7f8a90; font-family: 'Rajdhani','Helvetica Neue',Arial,sans-serif; font-weight: 700; font-size: 30px; letter-spacing: 4px; }
-  .big    { fill: #eaf6f4; font-family: 'Orbitron','Arial Black',sans-serif; font-weight: 800; }
-  .unit   { fill: #7f8a90; font-family: 'Rajdhani',Arial,sans-serif; font-weight: 600; }
-  .dlab   { fill: #6f7a80; font-family: 'Rajdhani',Arial,sans-serif; font-weight: 700; letter-spacing: 3px; font-size: 24px; }
-  .dval   { font-family: 'Orbitron',Arial,sans-serif; font-weight: 700; }
-  .brand  { fill: #b9bdc2; font-family: 'Helvetica Neue',Arial,sans-serif; font-weight: 600; font-size: 22px; letter-spacing: 6px; }
+  /* System font stacks only — the Pi is often offline in the car, so no webfonts. */
+  .lab  { fill: #7f8a90; font-family: system-ui, 'Helvetica Neue', Arial, sans-serif; font-weight: 700; }
+  .slab { fill: #6f7a80; font-family: system-ui, 'Helvetica Neue', Arial, sans-serif; font-weight: 700; letter-spacing: 2px; font-size: 26px; }
+  .val  { font-family: ui-monospace, Menlo, 'DejaVu Sans Mono', monospace; font-weight: 700; }
 </style>
 </head>
 <body>
@@ -36,7 +33,7 @@
         <stop offset="0%" stop-color="#34373c" /><stop offset="50%" stop-color="#0d0e11" /><stop offset="100%" stop-color="#34373c" />
       </linearGradient>
       <radialGradient id="dotglow" cx="50%" cy="50%" r="50%">
-        <stop offset="0%" stop-color="#ff2233" stop-opacity="0.55" /><stop offset="70%" stop-color="#ff2233" stop-opacity="0.10" /><stop offset="100%" stop-color="#ff2233" stop-opacity="0" />
+        <stop offset="0%" stop-color="#ff2233" stop-opacity="0.5" /><stop offset="70%" stop-color="#ff2233" stop-opacity="0.09" /><stop offset="100%" stop-color="#ff2233" stop-opacity="0" />
       </radialGradient>
       <radialGradient id="dot" cx="42%" cy="38%" r="70%">
         <stop offset="0%" stop-color="#ff8a90" /><stop offset="45%" stop-color="#e5001c" /><stop offset="100%" stop-color="#9c0012" />
@@ -48,117 +45,111 @@
     <circle cx="500" cy="500" r="470" fill="url(#bezel2)" />
     <circle cx="500" cy="500" r="452" fill="url(#face)" />
 
-    <!-- g rings (0.5 / 1.0 / 1.5 g) -->
-    <circle class="ring" cx="500" cy="500" r="140" />
-    <circle class="ring" cx="500" cy="500" r="280" />
-    <circle class="ring" cx="500" cy="500" r="420" stroke="#2b3a3a" />
-    <text class="rlab" x="512" y="368" text-anchor="start">0.5</text>
-    <text class="rlab" x="512" y="228" text-anchor="start">1.0</text>
-    <text class="rlab" x="512" y="92"  text-anchor="start">1.5</text>
+    <!-- G-circle is centered at (500,420) and scaled so 1.5g = r285. This keeps
+         the ball's entire travel ABOVE the data shelf — no text collisions. -->
+    <circle cx="500" cy="420" r="95"  fill="none" stroke="#1f6f6a" stroke-width="2" />
+    <circle cx="500" cy="420" r="190" fill="none" stroke="#1f6f6a" stroke-width="2" />
+    <circle cx="500" cy="420" r="285" fill="none" stroke="#2b3a3a" stroke-width="2" />
+    <line x1="500" y1="120" x2="500" y2="720" stroke="#182024" stroke-width="2" />
+    <line x1="200" y1="420" x2="800" y2="420" stroke="#182024" stroke-width="2" />
+    <text x="695" y="205" fill="#3f6360" font-family="system-ui,sans-serif" font-size="30" font-weight="600">1.5</text>
 
-    <!-- crosshair -->
-    <line x1="500" y1="60" x2="500" y2="940" stroke="#1a2226" stroke-width="2" />
-    <line x1="60" y1="500" x2="940" y2="500" stroke="#1a2226" stroke-width="2" />
+    <text class="lab" x="500" y="98"  text-anchor="middle" font-size="34" letter-spacing="4">ACCEL</text>
+    <text class="lab" x="500" y="768" text-anchor="middle" font-size="34" letter-spacing="4">BRAKE</text>
+    <text class="lab" x="168" y="434" text-anchor="middle" font-size="32" letter-spacing="3">LEFT</text>
+    <text class="lab" x="832" y="434" text-anchor="middle" font-size="32" letter-spacing="3">RIGHT</text>
 
-    <!-- axis labels -->
-    <text class="axlab" x="500" y="120" text-anchor="middle">ACCEL</text>
-    <text class="axlab" x="500" y="900" text-anchor="middle">BRAKE</text>
-    <text class="axlab" x="96"  y="510" text-anchor="middle" transform="rotate(-90 96 500)">LEFT</text>
-    <text class="axlab" x="904" y="510" text-anchor="middle" transform="rotate(90 904 500)">RIGHT</text>
+    <!-- peak hold -->
+    <circle id="peakRing" cx="500" cy="420" r="0" fill="none" stroke="#ffb000" stroke-width="2" stroke-dasharray="4 8" opacity="0.45" />
+    <circle id="peakDot"  cx="500" cy="420" r="10" fill="none" stroke="#ffb000" stroke-width="4" />
 
-    <!-- peak marker + peak-hold ring -->
-    <circle id="peakRing" cx="500" cy="500" r="0" fill="none" stroke="#ffb000" stroke-width="2" stroke-dasharray="4 8" opacity="0.5" />
-    <circle id="peakDot" cx="500" cy="500" r="9" fill="none" stroke="#ffb000" stroke-width="4" />
-
-    <!-- comet trail (filled in by JS) -->
     <g id="trail"></g>
+    <circle id="glow" cx="500" cy="420" r="70" fill="url(#dotglow)" />
+    <circle id="ball" cx="500" cy="420" r="24" fill="url(#dot)" />
 
-    <!-- live dot -->
-    <circle id="glow" cx="500" cy="500" r="70" fill="url(#dotglow)" />
-    <circle id="ball" cx="500" cy="500" r="22" fill="url(#dot)" />
-
-    <!-- digital readouts -->
-    <text class="dlab" x="150" y="470" text-anchor="middle">LAT</text>
-    <text id="latV" class="dval" x="150" y="530" text-anchor="middle" font-size="52" fill="#2ce8d8">0.00</text>
-    <text class="dlab" x="850" y="470" text-anchor="middle">LON</text>
-    <text id="lonV" class="dval" x="850" y="530" text-anchor="middle" font-size="52" fill="#2ce8d8">0.00</text>
-
-    <text class="dlab" x="500" y="690" text-anchor="middle" fill="#8a6a1e">PEAK</text>
-    <text id="peakV" class="dval" x="500" y="756" text-anchor="middle" font-size="66" fill="#ffb000">0.00</text>
-    <text class="unit" x="500" y="800" text-anchor="middle" font-size="26">G</text>
-
-    <text class="brand" x="500" y="892" text-anchor="middle">944 S · SPORT CHRONO</text>
-    <text x="60" y="944" font-family="'Rajdhani',Arial" font-size="18" fill="#3a4a4a" letter-spacing="2">SIM</text>
+    <!-- data shelf -->
+    <line x1="215" y1="792" x2="785" y2="792" stroke="#1c2429" stroke-width="2" />
+    <text class="slab" x="305" y="836" text-anchor="middle">LAT</text>
+    <text class="slab" x="500" y="836" text-anchor="middle" fill="#8a6a1e">PEAK</text>
+    <text class="slab" x="695" y="836" text-anchor="middle">LON</text>
+    <text id="latV" class="val" x="305" y="898" text-anchor="middle" font-size="52" fill="#2ce8d8">0.00</text>
+    <text id="peakV" class="val" x="500" y="902" text-anchor="middle" font-size="58" fill="#ffb000">0.00</text>
+    <text id="lonV" class="val" x="695" y="898" text-anchor="middle" font-size="52" fill="#2ce8d8">0.00</text>
   </svg>
 </div>
 <script>
 (function () {
   var NS = "http://www.w3.org/2000/svg";
-  var SCALE = 280;            // px per g (1.5 g -> r420)
+  var CX = 500, CY = 420, SCALE = 190;   // px per g (1.5g -> r285)
   var ball = document.getElementById("ball"), glow = document.getElementById("glow");
-  var latV = document.getElementById("latV"), lonV = document.getElementById("lonV");
-  var peakV = document.getElementById("peakV"), peakDot = document.getElementById("peakDot"), peakRing = document.getElementById("peakRing");
-  var trailG = document.getElementById("trail");
-  var trail = [], peak = 0, peakDecay = 0;
+  var latV = document.getElementById("latV"), lonV = document.getElementById("lonV"), peakV = document.getElementById("peakV");
+  var peakDot = document.getElementById("peakDot"), peakRing = document.getElementById("peakRing");
+  var trailG = document.getElementById("trail"), trail = [], peak = 0, peakT = 0;
 
-  // build reusable trail dots
-  var TN = 34, dots = [];
+  var TN = 30, dots = [];
   for (var i = 0; i < TN; i++) {
     var c = document.createElementNS(NS, "circle");
-    c.setAttribute("r", 6 + i * 0.35); c.setAttribute("fill", "#ff2233");
+    c.setAttribute("r", 6 + i * 0.4); c.setAttribute("fill", "#ff2233");
     c.setAttribute("opacity", 0); trailG.appendChild(c); dots.push(c);
   }
 
-  // A simulated hot-lap sequence: waypoints [t, lateralG(+right), longG(+accel)]
-  var wp = [
-    [0.0,  0.0,  0.05], [1.4, 0.0, -1.10],   // straight -> hard braking
-    [2.9,  0.95, -0.35],[4.3, 1.02, 0.15],   // trail-brake into right, apex
-    [5.7,  0.30, 0.70], [6.6, 0.0, 0.15],    // power out -> straight
-    [7.2,  0.0, -1.05], [8.6, -0.98, -0.30], // brake into left
-    [10.0, -1.04, 0.15],[11.4, -0.28, 0.68], // apex left, power out
-    [12.0, 0.0, 0.05]
-  ];
-  var CYCLE = 12.0;
-  function smooth(a, b, t) { t = t * t * (3 - 2 * t); return a + (b - a) * t; }
+  // Live values, fed by the backend WebSocket when the ADXL335 is wired.
+  // Until then a simulated lap runs so the page can be previewed.
+  var live = false, gLat = 0, gLon = 0;
+  try {
+    var proto = location.protocol === "https:" ? "wss:" : "ws:";
+    var ws = new WebSocket(proto + "//" + location.host + "/ws");
+    ws.onmessage = function (ev) {
+      try {
+        var s = JSON.parse(ev.data);
+        if (s.g_lateral !== undefined && s.g_longitudinal !== undefined) {
+          live = true; gLat = s.g_lateral; gLon = s.g_longitudinal;
+        }
+      } catch (e) { /* ignore */ }
+    };
+  } catch (e) { /* no backend — stay in sim */ }
+
+  var wp = [[0,0,0.05],[1.4,0,-1.10],[2.9,0.95,-0.35],[4.3,1.02,0.15],[5.7,0.30,0.70],
+            [6.6,0,0.15],[7.2,0,-1.05],[8.6,-0.98,-0.30],[10.0,-1.04,0.15],[11.4,-0.28,0.68],[12.0,0,0.05]];
+  var CYCLE = 12;
+  function sm(a, b, t) { t = t * t * (3 - 2 * t); return a + (b - a) * t; }
   function sample(tt) {
-    for (var i = 0; i < wp.length - 1; i++) {
+    for (var i = 0; i < wp.length - 1; i++)
       if (tt >= wp[i][0] && tt <= wp[i + 1][0]) {
         var f = (tt - wp[i][0]) / (wp[i + 1][0] - wp[i][0]);
-        return [smooth(wp[i][1], wp[i + 1][1], f), smooth(wp[i][2], wp[i + 1][2], f)];
+        return [sm(wp[i][1], wp[i + 1][1], f), sm(wp[i][2], wp[i + 1][2], f)];
       }
-    }
     return [0, 0];
   }
 
   var t0 = performance.now();
   function frame(now) {
-    var tt = ((now - t0) / 1000) % CYCLE;
-    var g = sample(tt);
-    // tiny jitter so it feels alive
-    var lat = g[0] + (Math.random() - 0.5) * 0.03;
-    var lon = g[1] + (Math.random() - 0.5) * 0.03;
-    var x = 500 + lat * SCALE, y = 500 - lon * SCALE;
+    var lat, lon;
+    if (live) { lat = gLat; lon = gLon; }
+    else { var g = sample(((now - t0) / 1000) % CYCLE);
+           lat = g[0] + (Math.random() - 0.5) * 0.03;
+           lon = g[1] + (Math.random() - 0.5) * 0.03; }
+
+    // clamp the drawn position to the 1.5g ring so it can never reach the shelf
+    var mag = Math.sqrt(lat * lat + lon * lon), dm = Math.min(mag, 1.5), k = mag > 0 ? dm / mag : 0;
+    var x = CX + lat * k * SCALE, y = CY - lon * k * SCALE;
     ball.setAttribute("cx", x); ball.setAttribute("cy", y);
     glow.setAttribute("cx", x); glow.setAttribute("cy", y);
 
-    // trail
     trail.push([x, y]); if (trail.length > TN) trail.shift();
     for (var i = 0; i < trail.length; i++) {
-      var d = dots[i], p = trail[i];
-      d.setAttribute("cx", p[0]); d.setAttribute("cy", p[1]);
-      d.setAttribute("opacity", (i / TN) * 0.5);
+      dots[i].setAttribute("cx", trail[i][0]); dots[i].setAttribute("cy", trail[i][1]);
+      dots[i].setAttribute("opacity", (i / TN) * 0.5);
     }
 
-    // peak hold w/ slow decay
-    var mag = Math.sqrt(lat * lat + lon * lon);
-    if (mag > peak) { peak = mag; peakDecay = now;
+    if (mag > peak) { peak = mag; peakT = now;
       peakDot.setAttribute("cx", x); peakDot.setAttribute("cy", y);
-      peakRing.setAttribute("r", mag * SCALE);
+      peakRing.setAttribute("r", dm * SCALE);
     }
-    if (now - peakDecay > 2600) peak = Math.max(mag, peak - 0.004);
+    if (now - peakT > 2600) peak = Math.max(mag, peak - 0.004);
 
-    latV.textContent = (lat >= 0 ? "" : "-") + Math.abs(lat).toFixed(2);
-    lonV.textContent = (lon >= 0 ? "" : "-") + Math.abs(lon).toFixed(2);
+    latV.textContent = (lat < 0 ? "-" : "") + Math.abs(lat).toFixed(2);
+    lonV.textContent = (lon < 0 ? "-" : "") + Math.abs(lon).toFixed(2);
     peakV.textContent = peak.toFixed(2);
     requestAnimationFrame(frame);
   }
