@@ -198,6 +198,7 @@ export default function HVACDashboard() {
   const [interiorTemp, setInteriorTemp] = useState(72);
   const [testOverride, setTestOverride] = useState(false);
   const [testInteriorTemp, setTestInteriorTemp] = useState(72);
+  const [auxDisplay, setAuxDisplay] = useState("clock");
   const [mixFlap, setMixFlap] = useState(35);
   const [defrostFlap, setDefrostFlap] = useState(0);
   const [footFlap, setFootFlap] = useState(0);
@@ -257,6 +258,7 @@ export default function HVACDashboard() {
           apply("interior_temp_f", setInteriorTemp);
           apply("test_override", setTestOverride);
           apply("test_interior_temp_f", setTestInteriorTemp);
+          apply("aux_display", setAuxDisplay);
           apply("mix_flap_pos", setMixFlap);
           apply("defrost_flap_pos", setDefrostFlap);
           apply("footwell_flap_pos", setFootFlap);
@@ -315,6 +317,7 @@ export default function HVACDashboard() {
       sendCmd({ test_override: false });
     }
   };
+  const cmdAuxDisplay = (v) => { setAuxDisplay(v); sendCmd({ aux_display: v }); };
   const cmdTestInteriorTemp = (v) => {
     const val = Math.max(20, Math.min(140, Math.round(v)));
     setTestInteriorTemp(val); sendCmd({ test_interior_temp_f: val });
@@ -477,6 +480,29 @@ export default function HVACDashboard() {
             <Lamp label="HEAT VLV" on={heatValve} color={C.amber} />
             <Lamp label="A/C CLU" on={acOn} color={C.ice} />
             <Lamp label="FLAP" on={anyFlapFault} color={C.red} blink />
+          </div>
+
+          {/* Round auxiliary screen selector */}
+          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+            <span style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 16, fontWeight: 700,
+              letterSpacing: 2, color: C.dim, whiteSpace: "nowrap" }}>AUX</span>
+            <div style={{ display: "flex", border: `1.5px solid ${C.line}`,
+              borderRadius: 7, overflow: "hidden" }}>
+              {[{ k: "clock", l: "CLOCK" }, { k: "gmeter", l: "G-METER" }].map((o) => {
+                const on = auxDisplay === o.k;
+                return (
+                  <button key={o.k} onClick={() => cmdAuxDisplay(o.k)} style={{
+                    padding: "9px 15px", border: "none",
+                    background: on ? C.vfdDim : "transparent",
+                    color: on ? C.vfd : C.mid,
+                    fontFamily: "'Rajdhani',sans-serif", fontSize: 19, fontWeight: 700,
+                    letterSpacing: 1.6, whiteSpace: "nowrap",
+                    textShadow: on ? `0 0 9px ${C.vfd}70` : "none",
+                    transition: "all 0.15s",
+                  }}>{o.l}</button>
+                );
+              })}
+            </div>
           </div>
 
           <button onClick={() => cmdTestOverride(!testOverride)} style={{

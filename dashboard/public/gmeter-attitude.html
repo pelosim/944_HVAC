@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>944S · G-Force</title>
+<style>
+  /* Keep in sync with clock.html so both sit identically in the bezel */
+  :root { --fit: 94; --nudge-x: -10px; --nudge-y: 12px; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; background: #000; overflow: hidden; cursor: none; }
+  #wrap { width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; background: #000; }
+  canvas { width: min(calc(var(--fit)*1vw), calc(var(--fit)*1vh));
+           height: min(calc(var(--fit)*1vw), calc(var(--fit)*1vh));
+           display: block; position: relative; left: var(--nudge-x); top: var(--nudge-y); }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="cv"></canvas></div>
+<script>
+/* ─────────────────────────────────────────────────────────────
+   944S G-meter — attitude nav-ball, tuned for pitch/roll clarity.
+
+   Straight-on view like a real aircraft attitude indicator (that's the
+   orientation flight instruments use because it's the clearest read):
+   - horizon = bright glowing line across the ball
+   - pitch ladder: solid teal above (sky), dashed amber below (ground),
+     labeled every 30° — brake hard and amber floods the ball
+   - fixed roll tick arc with a moving amber bank pointer
+   - fixed white aircraft reference at center
+   - big combined-G + LEAN/PITCH shelf below, PK on top
+   True apparent-gravity attitude — no exaggeration (1 g = 45°).
+
+   Canvas 2D, hand-rolled orthographic sphere. No WebGL (Pi V3D is flaky,
+   car is offline). 1000x1000 design space. ?fps=1 shows frame rate.
+   ───────────────────────────────────────────────────────────── */
+(function () {
+  var cv = document.getElementById("cv"), ctx = cv.getContext("2d"), K = 1;
+  var C = { vfd:"#2ce8d8", vfdHi:"#8ffff2", amber:"#ffb000", ice:"#5cb8ff",
+            red:"#ff3b30", text:"#eaf6f4", mid:"#8ea6a3" };
+  var CX = 500, CY = 415, R = 250;
+  var showFps = location.search.indexOf("fps") >= 0;
+
+  function resize() {
+    var dpr = window.devicePixelRatio || 1;
+    var w = Math.round(cv.clientWidth * dpr), h = Math.round(cv.clientHeight * dpr);
+    if (w && h) { cv.width = w; cv.height = h; K = w / 1000; }
+  }
+  window.addEventListener("resize", resize);
+
+  // ── sphere geometry ────────────────────────────────────────
+  function P(la, lo) { var a = la*Math.PI/180, b = lo*Math.PI/180, c = Math.cos(a);
+                       return [c*Math.cos(b), Math.sin(a), c*Math.sin(b)]; }
+  function ring(la, step) { var r = []; for (var lo = 0; lo <= 360; lo += step) r.push(P(la, lo)); return r; }
+  // 12° segments: chord error on r250 is ~1.4 design units (<1px on glass),
+  // and halving the segment count keeps the Pi at panel refresh.
+  var skyLadder = [], groundLadder = [], equator = ring(0, 8), mers = [];
+  [15,30,45,60,75].forEach(function (la) { skyLadder.push(ring(la, 12)); groundLadder.push(ring(-la, 12)); });
+  [45,90,135].forEach(function (lo) {
+    var m = []; for (var la = -90; la <= 90; la += 10) m.push(P(la, lo)); mers.push(m);
+  });
+
+  // pitch about X then roll about Z, orthographic straight-on projection
+  var cr = 1, sr = 0, cp = 1, sp = 0;
+  function xf(p) {
+    var y1 = p[1]*cp - p[2]*sp, z1 = p[1]*sp + p[2]*cp;
+    var x2 = p[0]*cr - y1*sr,  y2 = p[0]*sr + y1*cr;
+    return [CX + x2*R, CY - y2*R, z1];
+  }
+  function front(list) {           // stroke only front-facing segments
+    ctx.beginPath();
+    for (var i = 0; i < list.length; i++) {
+      var pts = list[i];
+      for (var j = 0; j < pts.length - 1; j++) {
+        var a = xf(pts[j]), b = xf(pts[j+1]);
+        if ((a[2] + b[2]) <= 0) continue;
+        ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]);
+      }
+    }
+    ctx.stroke();
+  }
+
+  // ── live data (backend) with simulated fallback ────────────
+  var live = false, gLat = 0, gLon = 0;
+  try {
+    var proto = location.protocol === "https:" ? "wss:" : "ws:";
+    var ws = new WebSocket(proto + "//" + location.host + "/ws");
+    ws.onmessage = function (ev) {
+      try { var s = JSON.parse(ev.data);
+        if (s.g_lateral !== undefined && s.g_longitudinal !== undefined) {
+          live = true; gLat = s.g_lateral; gLon = s.g_longitudinal; }
+      } catch (e) {}
+    };
+  } catch (e) {}
+
+  var wp = [[0,0,0.05],[1.4,0,-1.10],[2.9,0.95,-0.35],[4.3,1.02,0.15],[5.7,0.30,0.70],
+            [6.6,0,0.15],[7.2,0,-1.05],[8.6,-0.98,-0.30],[10.0,-1.04,0.15],[11.4,-0.28,0.68],[12.0,0,0.05]];
+  function sm(a,b,t){ t = t*t*(3-2*t); return a + (b-a)*t; }
+  function sample(tt) {
+    for (var i = 0; i < wp.length-1; i++)
+      if (tt >= wp[i][0] && tt <= wp[i+1][0]) {
+        var f = (tt - wp[i][0]) / (wp[i+1][0] - wp[i][0]);
+        return [sm(wp[i][1],wp[i+1][1],f), sm(wp[i][2],wp[i+1][2],f)];
+      }
+    return [0,0];
+  }
+
+  var peak = 0, peakT = 0, t0 = performance.now(), fps = 0, fAcc = 0, fN = 0, fT = t0;
+
+  function frame(now) {
+    if (!cv.width) resize();
+    var lat, lon;
+    if (live) { lat = gLat; lon = gLon; }
+    else { var g = sample(((now - t0)/1000) % 12);
+           lat = g[0] + (Math.random()-0.5)*0.02;
+           lon = g[1] + (Math.random()-0.5)*0.02; }
+
+    var mag = Math.sqrt(lat*lat + lon*lon);
+    if (mag > peak) { peak = mag; peakT = now; }
+    if (now - peakT > 2600) peak = Math.max(mag, peak - 0.004);
+
+    var roll = Math.atan(lat), pitch = Math.atan(lon);
+    cr = Math.cos(roll); sr = Math.sin(roll); cp = Math.cos(pitch); sp = Math.sin(pitch);
+
+    ctx.setTransform(K, 0, 0, K, 0, 0);
+    ctx.clearRect(0, 0, 1000, 1000);
+    ctx.save();
+    ctx.beginPath(); ctx.arc(500, 500, 452, 0, 6.2832); ctx.clip();
+
+    var fg = ctx.createRadialGradient(500, 430, 40, 500, 500, 452);
+    fg.addColorStop(0, "#0d1014"); fg.addColorStop(0.62, "#080a0d"); fg.addColorStop(1, "#020304");
+    ctx.fillStyle = fg; ctx.fillRect(0, 0, 1000, 1000);
+
+    ctx.lineCap = "round"; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+
+    // meridians — dim structure only
+    ctx.strokeStyle = C.vfd; ctx.globalAlpha = 0.18; ctx.lineWidth = 2;
+    front(mers);
+
+    // ground ladder — dashed amber (below horizon)
+    ctx.globalAlpha = 0.85; ctx.strokeStyle = C.amber; ctx.lineWidth = 3;
+    ctx.setLineDash([16, 12]);
+    front(groundLadder);
+    ctx.setLineDash([]);
+
+    // sky ladder — solid teal (above horizon)
+    ctx.strokeStyle = C.vfd;
+    front(skyLadder);
+
+    // horizon — the hero line, with glow
+    ctx.globalAlpha = 0.14; ctx.strokeStyle = C.vfdHi; ctx.lineWidth = 14;
+    front([equator]);
+    ctx.globalAlpha = 1; ctx.lineWidth = 5.5;
+    front([equator]);
+
+    // ladder labels (30/60, both hemispheres) ride their rungs
+    ctx.font = "bold 26px ui-monospace, Menlo, monospace";
+    [[30, C.vfd], [60, C.vfd], [-30, C.amber], [-60, C.amber]].forEach(function (L) {
+      var la = L[0]*Math.PI/180;
+      var p = xf([Math.cos(la)*0.966, Math.sin(la), Math.cos(la)*0.259]);
+      if (p[2] > 0.05) { ctx.fillStyle = L[1]; ctx.globalAlpha = 0.85;
+        ctx.fillText(Math.abs(L[0]).toString(), p[0] + 30, p[1] + 9); }
+    });
+    ctx.globalAlpha = 1;
+
+    // sphere limb
+    ctx.strokeStyle = C.vfd; ctx.globalAlpha = 0.3; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(CX, CY, R, 0, 6.2832); ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    // roll arc: fixed ticks, moving amber bank pointer
+    var i, a2;
+    ctx.strokeStyle = "#7f8a90"; ctx.lineWidth = 3;
+    ctx.beginPath();
+    for (i = -60; i <= 60; i += 15) {
+      a2 = i*Math.PI/180;
+      var r1 = 268, r2 = (i === 0) ? 296 : (i % 45 === 0 ? 290 : 282);
+      ctx.moveTo(CX + r1*Math.sin(a2), CY - r1*Math.cos(a2));
+      ctx.lineTo(CX + r2*Math.sin(a2), CY - r2*Math.cos(a2));
+    }
+    ctx.stroke();
+    ctx.font = "bold 22px ui-monospace, Menlo, monospace"; ctx.fillStyle = "#7f8a90";
+    [[-45,"45"],[45,"45"]].forEach(function (T) {
+      a2 = T[0]*Math.PI/180;
+      ctx.fillText(T[1], CX + 312*Math.sin(a2), CY - 312*Math.cos(a2) + 8);
+    });
+    // pointer at the bank angle
+    a2 = roll; var px = CX + 258*Math.sin(a2), py = CY - 258*Math.cos(a2);
+    ctx.save(); ctx.translate(px, py); ctx.rotate(a2);
+    ctx.fillStyle = C.amber;
+    ctx.beginPath(); ctx.moveTo(0, 6); ctx.lineTo(-14, -22); ctx.lineTo(14, -22); ctx.closePath(); ctx.fill();
+    ctx.restore();
+
+    // fixed aircraft reference
+    ctx.strokeStyle = C.text; ctx.lineWidth = 6; ctx.globalAlpha = 0.95;
+    ctx.beginPath();
+    ctx.moveTo(CX - 120, CY); ctx.lineTo(CX - 44, CY); ctx.lineTo(CX - 44, CY + 16);
+    ctx.moveTo(CX + 120, CY); ctx.lineTo(CX + 44, CY); ctx.lineTo(CX + 44, CY + 16);
+    ctx.stroke();
+    ctx.beginPath(); ctx.arc(CX, CY, 6, 0, 6.2832); ctx.fillStyle = C.text; ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // PK
+    ctx.font = "bold 28px ui-monospace, Menlo, monospace";
+    ctx.fillStyle = C.amber; ctx.fillText("PK " + peak.toFixed(2), 500, 100);
+
+    // data shelf
+    ctx.strokeStyle = "#1c2429"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(215, 762); ctx.lineTo(785, 762); ctx.stroke();
+    ctx.font = "bold 22px system-ui,'Helvetica Neue',Arial,sans-serif";
+    ctx.fillStyle = C.mid; ctx.fillText("LEAN", 285, 796); ctx.fillText("PITCH", 715, 796);
+    ctx.fillStyle = "#5d6f74"; ctx.fillText("G-FORCE", 500, 796);
+    var rd = roll*57.2958, pd = pitch*57.2958;
+    ctx.font = "bold 40px ui-monospace, Menlo, 'DejaVu Sans Mono', monospace";
+    ctx.fillStyle = C.ice; ctx.fillText((rd >= 0 ? "R" : "L") + Math.abs(rd).toFixed(0) + "°", 285, 852);
+    ctx.fillStyle = C.red; ctx.fillText((pd >= 0 ? "+" : "−") + Math.abs(pd).toFixed(0) + "°", 715, 852);
+    ctx.font = "bold 106px ui-monospace, Menlo, 'DejaVu Sans Mono', monospace";
+    ctx.fillStyle = C.text; ctx.textBaseline = "middle"; ctx.fillText(mag.toFixed(2), 500, 872);
+    ctx.textBaseline = "alphabetic";
+
+    if (showFps) {
+      fAcc += now - fT; fT = now; fN++;
+      if (fAcc >= 500) { fps = Math.round(1000 / (fAcc / fN)); fAcc = 0; fN = 0; }
+      ctx.font = "bold 26px ui-monospace, monospace"; ctx.fillStyle = "#3aff8c";
+      ctx.textAlign = "left"; ctx.fillText(fps + " FPS", 150, 706); ctx.textAlign = "center";
+    }
+    ctx.restore();
+
+    // bezel
+    var bg = ctx.createLinearGradient(0, 40, 0, 960);
+    bg.addColorStop(0, "#e9edf0"); bg.addColorStop(0.18, "#a7adb4");
+    bg.addColorStop(0.5, "#4c5157"); bg.addColorStop(0.82, "#9aa0a7"); bg.addColorStop(1, "#d7dbdf");
+    ctx.lineWidth = 34; ctx.strokeStyle = bg;
+    ctx.beginPath(); ctx.arc(500, 500, 478, 0, 6.2832); ctx.stroke();
+    ctx.lineWidth = 10; ctx.strokeStyle = "#14171b";
+    ctx.beginPath(); ctx.arc(500, 500, 457, 0, 6.2832); ctx.stroke();
+
+    requestAnimationFrame(frame);
+  }
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

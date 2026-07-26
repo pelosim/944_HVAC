@@ -2,7 +2,8 @@
 # labwc session autostart (installed to ~/.config/labwc/autostart).
 #
 # Dual output while the main touchscreen is being replaced:
-#   HDMI-A-1 (round panel)              -> Sport Chrono clock
+#   HDMI-A-1 (round panel)              -> aux.html: clock OR G-meter,
+#                                          switched from the HVAC dashboard
 #   HDMI-A-2 (forced 1920x720, cmdline) -> HVAC dashboard
 # rc.xml window rules pin each kiosk to its output; kanshi lays the two out.
 #
@@ -13,5 +14,5 @@
 #   sudo wayvncctl --socket=/tmp/wayvnc/wayvncctl.sock output-set HDMI-A-1  (clock)
 #   sudo wayvncctl --socket=/tmp/wayvnc/wayvncctl.sock output-set HDMI-A-2  (dashboard)
 
-/home/mark/hvac/deploy/clock-launch.sh &
+/home/mark/hvac/deploy/aux-launch.sh &
 /home/mark/hvac/deploy/kiosk-launch.sh &

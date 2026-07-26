@@ -219,6 +219,9 @@ class HVACState:
     test_override: bool = False
     test_interior_temp_f: float = 72.0
 
+    # Which page the round auxiliary screen shows: "clock" or "gmeter"
+    aux_display: str = "clock"
+
     def to_json(self):
         return json.dumps(asdict(self))
 
@@ -606,7 +609,7 @@ class HVACController:
     # ── State persistence (survives power loss) ──────────────
     _PERSIST_FIELDS = ("setpoint_f", "fan_speed", "ac_on", "heat_valve",
                        "outside_air", "vent_mode", "seat_heat_driver",
-                       "seat_heat_passenger")
+                       "seat_heat_passenger", "aux_display")
 
     def _load_state(self):
         """Restore last user settings from disk at startup."""
@@ -658,6 +661,10 @@ class HVACController:
             self.state.test_override = bool(cmd["test_override"])
         if "test_interior_temp_f" in cmd:
             self.state.test_interior_temp_f = max(20, min(140, float(cmd["test_interior_temp_f"])))
+        if "aux_display" in cmd:
+            page = str(cmd["aux_display"]).lower()
+            if page in ("clock", "gmeter"):
+                self.state.aux_display = page
         # Persist user settings after every command
         self._save_state()
 

@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>944S · Aux Display</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; background: #000; overflow: hidden; cursor: none; }
+  iframe { width: 100vw; height: 100vh; border: 0; display: block; background: #000; }
+</style>
+</head>
+<body>
+<iframe id="view" src="/clock.html" title="944S auxiliary display"></iframe>
+<script>
+/* ─────────────────────────────────────────────────────────────
+   Round auxiliary screen host.
+
+   The kiosk always loads THIS page; it swaps the iframe to whichever page
+   the backend's `aux_display` state names ("clock" | "gmeter"). Switching
+   is therefore instant and never restarts Chromium.
+
+   Only the active page is loaded — the other is fully unloaded rather than
+   hidden, so it burns no CPU on the Pi.
+   ───────────────────────────────────────────────────────────── */
+(function () {
+  var PAGES = { clock: "/clock.html", gmeter: "/gmeter.html" };
+  var view = document.getElementById("view");
+  var current = "clock";
+  var ws = null, retry = null;
+
+  function show(which) {
+    if (!PAGES[which] || which === current) return;
+    current = which;
+    view.src = PAGES[which];
+  }
+
+  function connect() {
+    try {
+      var proto = location.protocol === "https:" ? "wss:" : "ws:";
+      ws = new WebSocket(proto + "//" + location.host + "/ws");
+      ws.onopen = function () { if (retry) { clearInterval(retry); retry = null; } };
+      ws.onmessage = function (ev) {
+        try {
+          var s = JSON.parse(ev.data);
+          if (s.aux_display !== undefined) show(s.aux_display);
+        } catch (e) { /* ignore */ }
+      };
+      ws.onclose = function () {
+        ws = null;
+        if (!retry) retry = setInterval(connect, 2000);
+      };
+      ws.onerror = function () { if (ws) ws.close(); };
+    } catch (e) {
+      if (!retry) retry = setInterval(connect, 2000);
+    }
+  }
+  connect();
+})();
+</script>
+</body>
+</html>
