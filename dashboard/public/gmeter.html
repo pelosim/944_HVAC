@@ -5,154 +5,226 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
 <title>944S · G-Force</title>
 <style>
-  /* Match clock.html bezel fit — keep these in sync with clock.html */
+  /* Keep in sync with clock.html so both sit identically in the bezel */
   :root { --fit: 94; --nudge-x: -10px; --nudge-y: 12px; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { width: 100%; height: 100%; background: #000; overflow: hidden; cursor: none; }
   #wrap { width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; background: #000; }
-  svg { width: min(calc(var(--fit)*1vw), calc(var(--fit)*1vh));
-        height: min(calc(var(--fit)*1vw), calc(var(--fit)*1vh));
-        display: block; position: relative; left: var(--nudge-x); top: var(--nudge-y); }
-  /* System font stacks only — the Pi is often offline in the car, so no webfonts. */
-  .lab  { fill: #7f8a90; font-family: system-ui, 'Helvetica Neue', Arial, sans-serif; font-weight: 700; }
-  .slab { fill: #6f7a80; font-family: system-ui, 'Helvetica Neue', Arial, sans-serif; font-weight: 700; letter-spacing: 2px; font-size: 26px; }
-  .val  { font-family: ui-monospace, Menlo, 'DejaVu Sans Mono', monospace; font-weight: 700; }
+  canvas { width: min(calc(var(--fit)*1vw), calc(var(--fit)*1vh));
+           height: min(calc(var(--fit)*1vw), calc(var(--fit)*1vh));
+           display: block; position: relative; left: var(--nudge-x); top: var(--nudge-y); }
 </style>
 </head>
 <body>
-<div id="wrap">
-  <svg viewBox="0 0 1000 1000" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <radialGradient id="face" cx="50%" cy="42%" r="66%">
-        <stop offset="0%" stop-color="#12141a" /><stop offset="62%" stop-color="#0a0b0f" /><stop offset="100%" stop-color="#020203" />
-      </radialGradient>
-      <linearGradient id="bezel" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#e9edf0" /><stop offset="18%" stop-color="#a7adb4" /><stop offset="50%" stop-color="#4c5157" /><stop offset="82%" stop-color="#9aa0a7" /><stop offset="100%" stop-color="#d7dbdf" />
-      </linearGradient>
-      <linearGradient id="bezel2" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#34373c" /><stop offset="50%" stop-color="#0d0e11" /><stop offset="100%" stop-color="#34373c" />
-      </linearGradient>
-      <radialGradient id="dotglow" cx="50%" cy="50%" r="50%">
-        <stop offset="0%" stop-color="#ff2233" stop-opacity="0.5" /><stop offset="70%" stop-color="#ff2233" stop-opacity="0.09" /><stop offset="100%" stop-color="#ff2233" stop-opacity="0" />
-      </radialGradient>
-      <radialGradient id="dot" cx="42%" cy="38%" r="70%">
-        <stop offset="0%" stop-color="#ff8a90" /><stop offset="45%" stop-color="#e5001c" /><stop offset="100%" stop-color="#9c0012" />
-      </radialGradient>
-    </defs>
-
-    <!-- bezel + face -->
-    <circle cx="500" cy="500" r="498" fill="url(#bezel)" />
-    <circle cx="500" cy="500" r="470" fill="url(#bezel2)" />
-    <circle cx="500" cy="500" r="452" fill="url(#face)" />
-
-    <!-- G-circle is centered at (500,420) and scaled so 1.5g = r285. This keeps
-         the ball's entire travel ABOVE the data shelf — no text collisions. -->
-    <circle cx="500" cy="420" r="95"  fill="none" stroke="#1f6f6a" stroke-width="2" />
-    <circle cx="500" cy="420" r="190" fill="none" stroke="#1f6f6a" stroke-width="2" />
-    <circle cx="500" cy="420" r="285" fill="none" stroke="#2b3a3a" stroke-width="2" />
-    <line x1="500" y1="120" x2="500" y2="720" stroke="#182024" stroke-width="2" />
-    <line x1="200" y1="420" x2="800" y2="420" stroke="#182024" stroke-width="2" />
-    <text x="695" y="205" fill="#3f6360" font-family="system-ui,sans-serif" font-size="30" font-weight="600">1.5</text>
-
-    <text class="lab" x="500" y="98"  text-anchor="middle" font-size="34" letter-spacing="4">ACCEL</text>
-    <text class="lab" x="500" y="768" text-anchor="middle" font-size="34" letter-spacing="4">BRAKE</text>
-    <text class="lab" x="168" y="434" text-anchor="middle" font-size="32" letter-spacing="3">LEFT</text>
-    <text class="lab" x="832" y="434" text-anchor="middle" font-size="32" letter-spacing="3">RIGHT</text>
-
-    <!-- peak hold -->
-    <circle id="peakRing" cx="500" cy="420" r="0" fill="none" stroke="#ffb000" stroke-width="2" stroke-dasharray="4 8" opacity="0.45" />
-    <circle id="peakDot"  cx="500" cy="420" r="10" fill="none" stroke="#ffb000" stroke-width="4" />
-
-    <g id="trail"></g>
-    <circle id="glow" cx="500" cy="420" r="70" fill="url(#dotglow)" />
-    <circle id="ball" cx="500" cy="420" r="24" fill="url(#dot)" />
-
-    <!-- data shelf -->
-    <line x1="215" y1="792" x2="785" y2="792" stroke="#1c2429" stroke-width="2" />
-    <text class="slab" x="305" y="836" text-anchor="middle">LAT</text>
-    <text class="slab" x="500" y="836" text-anchor="middle" fill="#8a6a1e">PEAK</text>
-    <text class="slab" x="695" y="836" text-anchor="middle">LON</text>
-    <text id="latV" class="val" x="305" y="898" text-anchor="middle" font-size="52" fill="#2ce8d8">0.00</text>
-    <text id="peakV" class="val" x="500" y="902" text-anchor="middle" font-size="58" fill="#ffb000">0.00</text>
-    <text id="lonV" class="val" x="695" y="898" text-anchor="middle" font-size="52" fill="#2ce8d8">0.00</text>
-  </svg>
-</div>
+<div id="wrap"><canvas id="cv"></canvas></div>
 <script>
-(function () {
-  var NS = "http://www.w3.org/2000/svg";
-  var CX = 500, CY = 420, SCALE = 190;   // px per g (1.5g -> r285)
-  var ball = document.getElementById("ball"), glow = document.getElementById("glow");
-  var latV = document.getElementById("latV"), lonV = document.getElementById("lonV"), peakV = document.getElementById("peakV");
-  var peakDot = document.getElementById("peakDot"), peakRing = document.getElementById("peakRing");
-  var trailG = document.getElementById("trail"), trail = [], peak = 0, peakT = 0;
+/* ─────────────────────────────────────────────────────────────
+   944S vector nav-ball G-meter.
 
-  var TN = 30, dots = [];
-  for (var i = 0; i < TN; i++) {
-    var c = document.createElementNS(NS, "circle");
-    c.setAttribute("r", 6 + i * 0.4); c.setAttribute("fill", "#ff2233");
-    c.setAttribute("opacity", 0); trailG.appendChild(c); dots.push(c);
+   Canvas 2D with hand-rolled 3D — deliberately NOT WebGL/three.js:
+   this Pi's V3D stack already proved flaky (SVG feDropShadow silently
+   fails), the car is usually offline so no CDN, and at 480x480 a few
+   hundred line segments is trivial for Skia. Vector line-drawing is
+   also the authentic period look.
+
+   Drawn in a 1000x1000 design space, scaled to the canvas each frame.
+   Add ?fps=1 to the URL to show a frame-rate readout.
+   ───────────────────────────────────────────────────────────── */
+(function () {
+  var cv = document.getElementById("cv"), ctx = cv.getContext("2d"), K = 1;
+  var C = { vfd:"#2ce8d8", vfdHi:"#8ffff2", amber:"#ffb000", ice:"#5cb8ff",
+            red:"#ff3b30", text:"#eaf6f4", mid:"#8ea6a3", dim:"#46565a" };
+  var CX = 500, CY = 415, RAD = 250, AXL = RAD * 1.10;
+  var showFps = location.search.indexOf("fps") >= 0;
+
+  function resize() {
+    var dpr = window.devicePixelRatio || 1;
+    var w = Math.round(cv.clientWidth * dpr), h = Math.round(cv.clientHeight * dpr);
+    if (w && h) { cv.width = w; cv.height = h; K = w / 1000; }
+  }
+  window.addEventListener("resize", resize);
+
+  // ── sphere geometry (unit sphere) ──────────────────────────
+  function P(la, lo) { var a = la*Math.PI/180, b = lo*Math.PI/180, c = Math.cos(a);
+                       return [c*Math.cos(b), Math.sin(a), c*Math.sin(b)]; }
+  var rings = [], equator = [], mers = [];
+  for (var la = -60; la <= 60; la += 30) {
+    var ring = []; for (var lo = 0; lo <= 360; lo += 10) ring.push(P(la, lo));
+    if (la === 0) equator = ring; else rings.push(ring);
+  }
+  for (var lo2 = 0; lo2 < 360; lo2 += 45) {
+    var mer = []; for (var la2 = -90; la2 <= 90; la2 += 10) mer.push(P(la2, lo2));
+    mers.push(mer);
   }
 
-  // Live values, fed by the backend WebSocket when the ADXL335 is wired.
-  // Until then a simulated lap runs so the page can be previewed.
+  // Fixed 3/4 viewing angle so all three axes stay visible at rest
+  // (a spinning ball would rob the triad of its meaning).
+  var VY = 28*Math.PI/180, VP = 16*Math.PI/180;
+  var cvy = Math.cos(VY), svy = Math.sin(VY), cvp = Math.cos(VP), svp = Math.sin(VP);
+
+  var cr = 1, sr = 0, cp = 1, sp = 0;
+  function xf(p) {
+    var x = p[0], y = p[1], z = p[2];
+    var y1 = y*cp - z*sp,  z1 = y*sp + z*cp;      // G pitch about X
+    var x2 = x*cr - y1*sr, y2 = x*sr + y1*cr;     // G roll about Z
+    var x3 = x2*cvy + z1*svy, z3 = -x2*svy + z1*cvy;   // view yaw
+    var y4 = y2*cvp - z3*svp, z4 = y2*svp + z3*cvp;    // view pitch
+    return [CX + x3*RAD, CY - y4*RAD, z4];
+  }
+
+  function batch(list, front) {
+    ctx.beginPath();
+    for (var i = 0; i < list.length; i++) {
+      var pts = list[i];
+      for (var j = 0; j < pts.length - 1; j++) {
+        var a = xf(pts[j]), b = xf(pts[j+1]);
+        if (((a[2] + b[2]) > 0) !== front) continue;
+        ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]);
+      }
+    }
+    ctx.stroke();
+  }
+
+  function axis(v, color, label) {
+    var pos = xf(v), neg = xf([-v[0], -v[1], -v[2]]);
+    // negative half, faint
+    ctx.globalAlpha = 0.22; ctx.strokeStyle = color; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(CX, CY); ctx.lineTo(neg[0], neg[1]); ctx.stroke();
+    // positive half — brighter when pointing toward the viewer
+    var near = pos[2] > 0;
+    ctx.globalAlpha = near ? 1 : 0.5; ctx.lineWidth = near ? 6 : 4;
+    ctx.beginPath(); ctx.moveTo(CX, CY); ctx.lineTo(pos[0], pos[1]); ctx.stroke();
+    ctx.fillStyle = color; ctx.beginPath();
+    ctx.arc(pos[0], pos[1], near ? 11 : 8, 0, 6.2832); ctx.fill();
+    ctx.globalAlpha = near ? 1 : 0.55;
+    ctx.font = "bold 30px system-ui, 'Helvetica Neue', Arial, sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(label, pos[0] + (pos[0] - CX) * 0.14, pos[1] + (pos[1] - CY) * 0.14 - 2);
+    ctx.globalAlpha = 1;
+  }
+
+  // ── live data (backend) with simulated fallback ────────────
   var live = false, gLat = 0, gLon = 0;
   try {
     var proto = location.protocol === "https:" ? "wss:" : "ws:";
     var ws = new WebSocket(proto + "//" + location.host + "/ws");
     ws.onmessage = function (ev) {
-      try {
-        var s = JSON.parse(ev.data);
+      try { var s = JSON.parse(ev.data);
         if (s.g_lateral !== undefined && s.g_longitudinal !== undefined) {
-          live = true; gLat = s.g_lateral; gLon = s.g_longitudinal;
-        }
-      } catch (e) { /* ignore */ }
+          live = true; gLat = s.g_lateral; gLon = s.g_longitudinal; }
+      } catch (e) {}
     };
-  } catch (e) { /* no backend — stay in sim */ }
+  } catch (e) {}
 
   var wp = [[0,0,0.05],[1.4,0,-1.10],[2.9,0.95,-0.35],[4.3,1.02,0.15],[5.7,0.30,0.70],
             [6.6,0,0.15],[7.2,0,-1.05],[8.6,-0.98,-0.30],[10.0,-1.04,0.15],[11.4,-0.28,0.68],[12.0,0,0.05]];
-  var CYCLE = 12;
-  function sm(a, b, t) { t = t * t * (3 - 2 * t); return a + (b - a) * t; }
+  function sm(a,b,t){ t = t*t*(3-2*t); return a + (b-a)*t; }
   function sample(tt) {
-    for (var i = 0; i < wp.length - 1; i++)
-      if (tt >= wp[i][0] && tt <= wp[i + 1][0]) {
-        var f = (tt - wp[i][0]) / (wp[i + 1][0] - wp[i][0]);
-        return [sm(wp[i][1], wp[i + 1][1], f), sm(wp[i][2], wp[i + 1][2], f)];
+    for (var i = 0; i < wp.length-1; i++)
+      if (tt >= wp[i][0] && tt <= wp[i+1][0]) {
+        var f = (tt - wp[i][0]) / (wp[i+1][0] - wp[i][0]);
+        return [sm(wp[i][1],wp[i+1][1],f), sm(wp[i][2],wp[i+1][2],f)];
       }
-    return [0, 0];
+    return [0,0];
   }
 
-  var t0 = performance.now();
+  var peak = 0, peakT = 0, t0 = performance.now(), fps = 0, fAcc = 0, fN = 0, fT = t0;
+
   function frame(now) {
+    if (!cv.width) resize();
     var lat, lon;
     if (live) { lat = gLat; lon = gLon; }
-    else { var g = sample(((now - t0) / 1000) % CYCLE);
-           lat = g[0] + (Math.random() - 0.5) * 0.03;
-           lon = g[1] + (Math.random() - 0.5) * 0.03; }
+    else { var g = sample(((now - t0)/1000) % 12);
+           lat = g[0] + (Math.random()-0.5)*0.02;
+           lon = g[1] + (Math.random()-0.5)*0.02; }
 
-    // clamp the drawn position to the 1.5g ring so it can never reach the shelf
-    var mag = Math.sqrt(lat * lat + lon * lon), dm = Math.min(mag, 1.5), k = mag > 0 ? dm / mag : 0;
-    var x = CX + lat * k * SCALE, y = CY - lon * k * SCALE;
-    ball.setAttribute("cx", x); ball.setAttribute("cy", y);
-    glow.setAttribute("cx", x); glow.setAttribute("cy", y);
-
-    trail.push([x, y]); if (trail.length > TN) trail.shift();
-    for (var i = 0; i < trail.length; i++) {
-      dots[i].setAttribute("cx", trail[i][0]); dots[i].setAttribute("cy", trail[i][1]);
-      dots[i].setAttribute("opacity", (i / TN) * 0.5);
-    }
-
-    if (mag > peak) { peak = mag; peakT = now;
-      peakDot.setAttribute("cx", x); peakDot.setAttribute("cy", y);
-      peakRing.setAttribute("r", dm * SCALE);
-    }
+    var mag = Math.sqrt(lat*lat + lon*lon);
+    if (mag > peak) { peak = mag; peakT = now; }
     if (now - peakT > 2600) peak = Math.max(mag, peak - 0.004);
 
-    latV.textContent = (lat < 0 ? "-" : "") + Math.abs(lat).toFixed(2);
-    lonV.textContent = (lon < 0 ? "-" : "") + Math.abs(lon).toFixed(2);
-    peakV.textContent = peak.toFixed(2);
+    var roll = Math.atan(lat), pitch = Math.atan(lon);
+    cr = Math.cos(roll); sr = Math.sin(roll); cp = Math.cos(pitch); sp = Math.sin(pitch);
+
+    ctx.setTransform(K, 0, 0, K, 0, 0);
+    ctx.clearRect(0, 0, 1000, 1000);
+    ctx.save();
+    ctx.beginPath(); ctx.arc(500, 500, 452, 0, 6.2832); ctx.clip();
+
+    var fg = ctx.createRadialGradient(500, 420, 40, 500, 500, 452);
+    fg.addColorStop(0, "#0d1014"); fg.addColorStop(0.62, "#080a0d"); fg.addColorStop(1, "#020304");
+    ctx.fillStyle = fg; ctx.fillRect(0, 0, 1000, 1000);
+
+    // sphere — back hemisphere first, then front
+    ctx.lineCap = "round";
+    ctx.strokeStyle = C.vfd; ctx.lineWidth = 2; ctx.globalAlpha = 0.16;
+    batch(rings, false); batch(mers, false);
+    ctx.globalAlpha = 0.85; batch(rings, true); batch(mers, true);
+    // equator gets emphasis — it's the tilt datum
+    ctx.strokeStyle = C.vfdHi; ctx.lineWidth = 3; ctx.globalAlpha = 0.2;
+    batch([equator], false);
+    ctx.globalAlpha = 1; ctx.lineWidth = 4; batch([equator], true);
+    ctx.globalAlpha = 1;
+
+    // 3-axis anchor (world/gravity frame)
+    axis([0, 1, 0], C.amber, "U");
+    axis([1, 0, 0], C.ice,   "R");
+    axis([0, 0, 1], C.red,   "F");
+
+    // fixed vehicle reference — screen-locked, so "me" vs "world" stays clear
+    ctx.strokeStyle = C.text; ctx.lineWidth = 4; ctx.globalAlpha = 0.95;
+    ctx.beginPath();
+    ctx.moveTo(CX - 118, CY); ctx.lineTo(CX - 46, CY);
+    ctx.moveTo(CX + 46, CY);  ctx.lineTo(CX + 118, CY);
+    ctx.stroke();
+    ctx.beginPath(); ctx.arc(CX, CY, 5, 0, 6.2832); ctx.fillStyle = C.text; ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // ── data shelf ──
+    ctx.strokeStyle = "#1c2429"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(215, 762); ctx.lineTo(785, 762); ctx.stroke();
+
+    ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+    ctx.font = "bold 22px system-ui, 'Helvetica Neue', Arial, sans-serif";
+    ctx.fillStyle = C.mid;
+    ctx.fillText("LEAN", 285, 796);
+    ctx.fillText("PITCH", 715, 796);
+    ctx.fillStyle = "#5d6f74"; ctx.fillText("G-FORCE", 500, 796);
+
+    var rd = roll * 57.2958, pd = pitch * 57.2958;
+    ctx.font = "bold 40px ui-monospace, Menlo, 'DejaVu Sans Mono', monospace";
+    ctx.fillStyle = C.ice;
+    ctx.fillText((rd >= 0 ? "R" : "L") + Math.abs(rd).toFixed(0) + "°", 285, 852);
+    ctx.fillStyle = C.red;
+    ctx.fillText((pd >= 0 ? "+" : "−") + Math.abs(pd).toFixed(0) + "°", 715, 852);
+
+    ctx.font = "bold 108px ui-monospace, Menlo, 'DejaVu Sans Mono', monospace";
+    ctx.fillStyle = C.text; ctx.textBaseline = "middle";
+    ctx.fillText(mag.toFixed(2), 500, 868);
+
+    ctx.textBaseline = "alphabetic";
+    ctx.font = "bold 28px ui-monospace, Menlo, monospace";
+    ctx.fillStyle = C.amber; ctx.fillText("PK " + peak.toFixed(2), 500, 96);
+
+    if (showFps) {
+      fAcc += now - fT; fT = now; fN++;
+      if (fAcc >= 500) { fps = Math.round(1000 / (fAcc / fN)); fAcc = 0; fN = 0; }
+      ctx.font = "bold 26px ui-monospace, monospace"; ctx.fillStyle = "#3aff8c";
+      ctx.textAlign = "left"; ctx.fillText(fps + " FPS", 232, 700);
+    }
+    ctx.restore();
+
+    // bezel
+    var bg = ctx.createLinearGradient(0, 40, 0, 960);
+    bg.addColorStop(0, "#e9edf0"); bg.addColorStop(0.18, "#a7adb4");
+    bg.addColorStop(0.5, "#4c5157"); bg.addColorStop(0.82, "#9aa0a7"); bg.addColorStop(1, "#d7dbdf");
+    ctx.lineWidth = 34; ctx.strokeStyle = bg;
+    ctx.beginPath(); ctx.arc(500, 500, 478, 0, 6.2832); ctx.stroke();
+    ctx.lineWidth = 10; ctx.strokeStyle = "#14171b";
+    ctx.beginPath(); ctx.arc(500, 500, 457, 0, 6.2832); ctx.stroke();
+
     requestAnimationFrame(frame);
   }
+  resize();
   requestAnimationFrame(frame);
 })();
 </script>
