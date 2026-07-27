@@ -5,9 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
 <title>944S · Aux Display</title>
 <style>
+  /* Physical mount correction for the round panel — the bezel sits a few
+     degrees off true, so everything shown on this screen is counter-rotated.
+     Positive = clockwise. Applied here (not in the child pages) so it covers
+     the clock, the G-meter and anything added later, and so the pages still
+     render level when viewed in a browser on another machine. */
+  :root { --aux-rotate: 3deg; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { width: 100%; height: 100%; background: #000; overflow: hidden; cursor: none; }
-  iframe { width: 100vw; height: 100vh; border: 0; display: block; background: #000; }
+  iframe { width: 100vw; height: 100vh; border: 0; display: block; background: #000;
+           transform: rotate(var(--aux-rotate)); transform-origin: 50% 50%; }
 </style>
 </head>
 <body>
