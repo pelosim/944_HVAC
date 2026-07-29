@@ -921,7 +921,15 @@ def idrive_reader_loop():
             port = serial.Serial(IDRIVE_PORT, IDRIVE_BAUD, timeout=1)
             log.info("iDrive link up on %s", IDRIVE_PORT)
             complained = False
-            for raw in port:
+            # Explicit readline() loop, NOT `for raw in port`. Iterating a
+            # Serial stops as soon as readline() returns empty, which the
+            # 1s timeout guarantees every time the knob is idle — the outer
+            # loop would then reopen the port and log "link up" once per
+            # second forever, without ever reading an event.
+            while True:
+                raw = port.readline()
+                if not raw:
+                    continue            # read timeout, nothing waiting
                 line = raw.decode("utf-8", errors="replace").strip()
                 if not line:
                     continue
