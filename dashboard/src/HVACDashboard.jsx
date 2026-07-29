@@ -166,6 +166,85 @@ function FlapTrack({ actual, target, base, dirColor, dir, n = 22, h = 16 }) {
   );
 }
 
+// ─── iDrive knob mirror ───────────────────────────────────────
+// Mirrors the physical BMW knob on the console. The ring rotates one
+// tick per detent, so the on-screen knob turns exactly as your hand
+// does — the dashboard becomes a readout for a control you cannot see
+// while driving.
+//
+// Values shown are only those the Pi genuinely knows. The head unit's
+// volume is owned by the radio over IR and never reaches the backend,
+// so MEDIA mode reports the direction of travel rather than inventing
+// a number.
+const IDRIVE_MODES = {
+  media: { label: "MEDIA", color: C.vfd,   param: "VOLUME" },
+  hvac:  { label: "HVAC",  color: C.amber, param: "SETPOINT" },
+  light: { label: "LIGHT", color: "#9c40ff", param: "BRIGHTNESS" },
+  gauge: { label: "GAUGE", color: C.ice,   param: "AUX PAGE" },
+};
+
+function KnobMirror({ mode, detents, action, active, setpoint, auxDisplay }) {
+  const m = IDRIVE_MODES[mode] || IDRIVE_MODES.media;
+  const tint = active ? m.color : C.dim;
+  const ticks = 24;
+  const angle = (detents % ticks) * (360 / ticks);
+
+  let value = "—";
+  if (mode === "hvac") value = `${Math.round(setpoint)}°`;
+  else if (mode === "gauge") value = auxDisplay === "gmeter" ? "G" : "CLK";
+  else if (mode === "media") {
+    if (action === "VOL_UP") value = "▲";
+    else if (action === "VOL_DOWN") value = "▼";
+    else if (action === "MUTE") value = "MUTE";
+    else if (action === "NEXT") value = "▶▶";
+    else if (action === "PREV") value = "◀◀";
+  }
+
+  return (
+    <div style={{ width: 190, display: "flex", flexDirection: "column",
+      alignItems: "center", justifyContent: "center", gap: 10 }}>
+      <span style={{
+        fontFamily: "'Rajdhani',sans-serif", fontSize: 19, fontWeight: 700,
+        letterSpacing: 3, color: tint,
+        textShadow: active ? `0 0 10px ${m.color}80` : "none",
+      }}>{m.label}</span>
+
+      <div style={{ position: "relative", width: 132, height: 132 }}>
+        <svg width="132" height="132" viewBox="0 0 132 132"
+          style={{ transform: `rotate(${angle}deg)`, transition: "transform 140ms linear" }}>
+          {Array.from({ length: ticks }).map((_, i) => {
+            const a = (i / ticks) * Math.PI * 2 - Math.PI / 2;
+            const rOut = 62, rIn = i % 6 === 0 ? 48 : 54;
+            return (
+              <line key={i}
+                x1={66 + Math.cos(a) * rIn}  y1={66 + Math.sin(a) * rIn}
+                x2={66 + Math.cos(a) * rOut} y2={66 + Math.sin(a) * rOut}
+                stroke={tint} strokeWidth={i % 6 === 0 ? 2.6 : 1.4}
+                strokeLinecap="round" opacity={i % 6 === 0 ? 1 : 0.55} />
+            );
+          })}
+        </svg>
+        <div style={{
+          position: "absolute", inset: 0, display: "flex", flexDirection: "column",
+          alignItems: "center", justifyContent: "center", gap: 2,
+        }}>
+          <span style={{
+            fontFamily: "'Orbitron',monospace", fontWeight: 700,
+            fontSize: value.length > 3 ? 22 : 34, lineHeight: 1,
+            color: tint, fontVariantNumeric: "tabular-nums",
+            textShadow: active ? `0 0 16px ${m.color}70` : "none",
+          }}>{value}</span>
+        </div>
+      </div>
+
+      <span style={{
+        fontFamily: "'Rajdhani',sans-serif", fontSize: 15, fontWeight: 600,
+        letterSpacing: 2, color: active ? C.text : C.dim,
+      }}>{m.param}</span>
+    </div>
+  );
+}
+
 // ─── Column divider (machined groove) ─────────────────────────
 function Groove() {
   return <div style={{
@@ -212,6 +291,10 @@ export default function HVACDashboard() {
   const [adsOk, setAdsOk] = useState(false);
   const [controlActive, setControlActive] = useState(false);
   const [time, setTime] = useState(new Date());
+  const [idriveMode, setIdriveMode] = useState("media");
+  const [idriveDetents, setIdriveDetents] = useState(0);
+  const [idriveAction, setIdriveAction] = useState("");
+  const [idriveActive, setIdriveActive] = useState(false);
 
   const sendCmd = useCallback((cmd) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -259,6 +342,10 @@ export default function HVACDashboard() {
           apply("test_override", setTestOverride);
           apply("test_interior_temp_f", setTestInteriorTemp);
           apply("aux_display", setAuxDisplay);
+          apply("idrive_mode", setIdriveMode);
+          apply("idrive_detents", setIdriveDetents);
+          apply("idrive_action", setIdriveAction);
+          apply("idrive_active", setIdriveActive);
           apply("mix_flap_pos", setMixFlap);
           apply("defrost_flap_pos", setDefrostFlap);
           apply("footwell_flap_pos", setFootFlap);
@@ -708,6 +795,12 @@ export default function HVACDashboard() {
               })}
             </div>
           </div>
+
+          <Groove />
+
+          {/* — iDrive knob mirror (right) — */}
+          <KnobMirror mode={idriveMode} detents={idriveDetents} action={idriveAction}
+            active={idriveActive} setpoint={setpoint} auxDisplay={auxDisplay} />
         </div>
 
         {/* ════ BAND 3 — CONTROL RAIL ════ */}

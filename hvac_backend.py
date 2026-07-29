@@ -138,6 +138,7 @@ HBRIDGE_MAX_ON_S = 5.0    # Safety: max continuous drive time
 # --- Control Loop Rate ---
 CONTROL_HZ = 10       # Main loop frequency
 SENSOR_HZ  = 2        # Temp sensor read frequency
+IDRIVE_ACTIVE_S = 4.0 # iDrive knob mirror stays "live" this long after input
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Detect platform — use stubs if not on a Pi
@@ -221,6 +222,18 @@ class HVACState:
 
     # Which page the round auxiliary screen shows: "clock" or "gmeter"
     aux_display: str = "clock"
+
+    # ── iDrive controller (BMW knob on the console, over UART) ────
+    # The ESP32 reads the knob off CAN and sends events on /dev/serial0.
+    # Real commands are applied through apply_command() like any other
+    # client; these fields exist only so the dashboard can mirror the
+    # physical knob on screen — which mode it is in, what it owns, and
+    # how far it has been turned.
+    idrive_mode: str = "media"        # media | hvac | light | gauge
+    idrive_detents: int = 0           # signed running total; rotates the mirror
+    idrive_action: str = ""           # last action name, for the caption
+    idrive_active: bool = False       # True briefly after any knob input
+    idrive_last_s: float = 0.0        # monotonic stamp of the last event
 
     def to_json(self):
         return json.dumps(asdict(self))
@@ -668,6 +681,65 @@ class HVACController:
         # Persist user settings after every command
         self._save_state()
 
+    # ── iDrive knob ───────────────────────────────────────────────
+    def apply_idrive_event(self, evt: dict):
+        """Translate one event from the iDrive controller.
+
+        Events arrive as NDJSON on the UART, e.g.
+            {"mode":"HVAC","action":"TEMP_UP","count":2}
+
+        Everything routes through apply_command() so the knob is just
+        another client — the touchscreen updates itself from the normal
+        state broadcast and the two can never disagree. The idrive_*
+        fields are display-only, for the on-screen knob mirror.
+        """
+        action = str(evt.get("action", "")).upper()
+        mode = str(evt.get("mode", "")).lower()
+        try:
+            count = max(1, min(12, int(evt.get("count", 1))))
+        except (TypeError, ValueError):
+            count = 1
+
+        if mode in ("media", "hvac", "light", "gauge"):
+            self.state.idrive_mode = mode
+        self.state.idrive_action = action
+        self.state.idrive_last_s = time.monotonic()
+
+        # Rotation moves the mirror ring regardless of what it controls.
+        if action.endswith(("_UP", "_BRIGHTER")) or action in ("VOL_UP",):
+            self.state.idrive_detents += count
+        elif action.endswith(("_DOWN", "_DIMMER")) or action in ("VOL_DOWN",):
+            self.state.idrive_detents -= count
+
+        cmd = {}
+        if action == "TEMP_UP":
+            cmd["setpoint_f"] = self.state.setpoint_f + count
+        elif action == "TEMP_DOWN":
+            cmd["setpoint_f"] = self.state.setpoint_f - count
+        elif action in ("FAN_UP", "FAN_DOWN"):
+            order = ["OFF", "LOW", "HI"]
+            i = order.index(self.state.fan_speed) if self.state.fan_speed in order else 1
+            i = max(0, min(len(order) - 1, i + (1 if action == "FAN_UP" else -1)))
+            cmd["fan_speed"] = order[i]
+        elif action == "HVAC_TOGGLE":
+            cmd["ac_on"] = not self.state.ac_on
+        elif action in ("HVAC_MODE_NEXT", "HVAC_MODE_PREV"):
+            order = ["face", "bilevel", "feet", "defrost"]
+            i = order.index(self.state.vent_mode) if self.state.vent_mode in order else 0
+            step = 1 if action == "HVAC_MODE_NEXT" else -1
+            cmd["vent_mode"] = order[(i + step) % len(order)]
+        elif action == "AUX_SWAP":
+            # Dedicated button: swap the round screen clock <-> G-meter.
+            cmd["aux_display"] = "gmeter" if self.state.aux_display == "clock" else "clock"
+
+        # MEDIA actions (volume/mute/track) and the LIGHT/GAUGE modes are
+        # reported for the mirror but have no backend command yet — the
+        # head unit is driven by IR, not by the Pi.
+        if cmd:
+            self.apply_command(cmd)
+        else:
+            self._save_state()
+
     def tick(self):
         """Called at CONTROL_HZ. Reads sensors, runs PIDs, drives outputs."""
         now = time.monotonic()
@@ -694,6 +766,12 @@ class HVACController:
 
         self.state.onewire_ok = self.hw.onewire_ok
         self.state.ads_ok = self.hw.ads_ok
+
+        # iDrive knob goes "live" on screen briefly after any input
+        self.state.idrive_active = (
+            self.state.idrive_last_s > 0
+            and (now - self.state.idrive_last_s) < IDRIVE_ACTIVE_S
+        )
 
         # ── Bench-test override ───────────────────────────────
         # Force a fake cabin temp so heating can be exercised indoors.
@@ -815,10 +893,60 @@ controller = HVACController(hw)
 connected_clients = set()
 
 
+# ── iDrive controller link ─────────────────────────────────────
+# The ESP32 in the HVAC enclosure reads the BMW knob off CAN and writes
+# newline-delimited JSON here. Runs in a daemon thread because pyserial
+# is blocking.
+#
+# Every failure path degrades quietly: no pyserial, no port, unplugged
+# cable, garbage bytes — all logged once and then retried or skipped.
+# The knob is a convenience; climate control must never depend on it.
+IDRIVE_PORT = "/dev/serial0"
+IDRIVE_BAUD = 115200
+# IDRIVE_ACTIVE_S lives with the other loop constants near the top.
+
+
+def idrive_reader_loop():
+    """Read iDrive events off the UART and feed them to the controller."""
+    try:
+        import serial
+    except ImportError:
+        log.warning("iDrive link disabled — pyserial not installed "
+                    "(pip install pyserial --break-system-packages)")
+        return
+
+    complained = False
+    while True:
+        try:
+            port = serial.Serial(IDRIVE_PORT, IDRIVE_BAUD, timeout=1)
+            log.info("iDrive link up on %s", IDRIVE_PORT)
+            complained = False
+            for raw in port:
+                line = raw.decode("utf-8", errors="replace").strip()
+                if not line:
+                    continue
+                try:
+                    evt = json.loads(line)
+                except json.JSONDecodeError:
+                    log.debug("iDrive: bad line %r", line[:80])
+                    continue
+                try:
+                    controller.apply_idrive_event(evt)
+                except Exception as e:
+                    log.error("iDrive: failed to apply %s: %s", evt, e)
+        except Exception as e:
+            if not complained:
+                log.warning("iDrive link unavailable (%s): %s — retrying", IDRIVE_PORT, e)
+                complained = True
+            time.sleep(5)
+
+
 @app.on_event("startup")
 async def startup():
     """Start the background control loop."""
     asyncio.create_task(control_loop())
+    threading.Thread(target=idrive_reader_loop, daemon=True,
+                     name="idrive-reader").start()
     log.info("HVAC controller started — %s mode", "SIMULATION" if SIMULATE else "HARDWARE")
 
 
