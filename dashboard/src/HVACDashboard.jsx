@@ -689,13 +689,19 @@ export default function HVACDashboard() {
                 <Segs value={((setpoint - 60) / 30) * 100} n={30} color={spColor} h={13} />
               </div>
               {/* mode annunciator window */}
+              {/* Fixed width, sized for the longest label ("VENTILATION").
+                  Without it the box resizes with its text, and because it is
+                  centred it moves on BOTH sides at once — most visibly when
+                  the setpoint crosses 80F, which auto-engages heat and flips
+                  VENTILATION (11 chars) to HEATING (7), jumping ~90px. */}
               <div style={{
-                marginTop: 8, padding: "7px 34px", borderRadius: 6,
+                marginTop: 8, padding: "7px 34px", borderRadius: 6, minWidth: 360,
                 border: `1px solid ${modeColor}55`, background: `${modeColor}0e`,
               }}>
                 <span style={{
                   fontFamily: "'Orbitron',monospace", fontSize: 28, fontWeight: 700,
                   letterSpacing: 6, color: modeColor, textShadow: `0 0 12px ${modeColor}70`,
+                  display: "block", textAlign: "center",
                 }}>{modeLabel}</span>
               </div>
             </div>
