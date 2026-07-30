@@ -156,8 +156,8 @@ footer{margin-top:56px;padding-top:20px;border-top:1px solid var(--line);
   <code>hvac_backend.py</code>, <code>idrive_controller.ino</code>, and
   <code>pwm_controller.ino</code>.</p>
   <div class="stamp">
-    <span>4 active modules</span>
-    <span>1 planned link</span>
+    <span>5 modules on the bench</span>
+    <span>3 boards on the Pi USB hub</span>
     <span>generated 2026-07-30</span>
   </div>
 </header>
@@ -312,7 +312,7 @@ graph LR
           <td><span class="chip t-usb">USB</span></td>
           <td class="mono">/dev/lighting</td>
           <td class="mono">L SET / L ADJ / L GET</td>
-          <td>Firmware ready, not wired</td>
+          <td>Working</td>
         </tr>
         <tr>
           <td>Knob &harr; lighting board</td>
@@ -421,10 +421,12 @@ graph LR
       <tbody>
         <tr><td class="mono">/dev/serial0</td><td class="mono">ttyAMA0</td><td>iDrive UART</td>
             <td class="mono">115200</td><td>needs <code>dtoverlay=disable-bt</code></td></tr>
-        <tr><td class="mono">/dev/idrive</td><td class="mono">ttyACM0</td><td>iDrive USB</td>
+        <tr><td class="mono">/dev/idrive</td><td class="mono">ttyACM1</td><td>iDrive USB</td>
             <td class="mono">—</td><td>udev by MAC D0:CF:13:24:DB:B8</td></tr>
-        <tr><td class="mono">/dev/lighting</td><td class="mono">pending</td><td>Lighting board</td>
-            <td class="mono">115200</td><td>udev line commented until confirmed</td></tr>
+        <tr><td class="mono">/dev/lighting</td><td class="mono">ttyACM0</td><td>Lighting board</td>
+            <td class="mono">115200</td><td>udev by MAC 3C:DC:75:40:0B:F0</td></tr>
+        <tr><td class="mono">/dev/gauges</td><td class="mono">ttyACM2</td><td>Gauge panel (primary)</td>
+            <td class="mono">—</td><td>console + flashing only; no protocol yet</td></tr>
       </tbody>
     </table>
   </div>
@@ -567,6 +569,12 @@ ch  1 = strip brightness   2 = MOSFET dimmer
         <tr><td>Flashing an ESP over the Pi works sometimes, fails others</td>
             <td>ModemManager probes new ttyACM devices with AT commands. udev rule
             ignores VID 303a.</td></tr>
+        <tr><td>Flashing a board over the Pi dies partway with "No more data to
+            read from the serial port"</td>
+            <td>The backend holds that port. It grabs <code>/dev/lighting</code> the
+            instant udev creates the symlink, then fights esptool for the device and
+            leaves a half-written app partition. <code>flash-via-pi.sh</code> now stops
+            and restarts the backend around the write.</td></tr>
         <tr><td>Dashboard "still looks old" after a rebuild</td>
             <td>Browser cache. Hard-refresh, or restart the kiosk.</td></tr>
       </tbody>
