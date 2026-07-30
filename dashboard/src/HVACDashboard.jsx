@@ -66,6 +66,26 @@ function Icon({ name, size = 30, color = C.mid, sw = 1.8, glow = false }) {
   );
 }
 
+// ─── Fixed-cell numerals ──────────────────────────────────────
+// Orbitron is NOT a tabular font. Measured from the font file itself:
+// "1" has an advance of 0.391 em while "0" and "8" are 0.834 em — less
+// than half. At the 210px setpoint that is a ~92px swing from a single
+// character, so 71 -> 72 visibly shoved the whole centre column.
+//
+// font-variant-numeric: tabular-nums cannot help; Orbitron ships no
+// "tnum" feature, so the declaration is silently ignored. The only
+// reliable fix is to give every glyph its own fixed cell, which is also
+// how a real segmented display behaves.
+const ORB_CELL_EM = 0.834;   // widest digit advance, measured
+
+function Digits({ value, size }) {
+  return String(value).split("").map((ch, i) => (
+    <span key={i} style={{
+      display: "inline-block", width: size * ORB_CELL_EM, textAlign: "center",
+    }}>{ch}</span>
+  ));
+}
+
 // ─── Segmented VFD bar ────────────────────────────────────────
 function Segs({ value, max = 100, n = 24, color = C.vfd, h = 14, vertical = false }) {
   const lit = Math.round((Math.max(0, Math.min(max, value)) / max) * n);
@@ -492,7 +512,6 @@ export default function HVACDashboard() {
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500;600;700;800;900&family=Rajdhani:wght@500;600;700&display=swap');
         *{margin:0;padding:0;box-sizing:border-box}
         html,body,#root{width:100%;height:100%;overflow:hidden;background:${C.bg}}
         button{cursor:pointer;outline:none;font-family:inherit}
@@ -669,14 +688,12 @@ export default function HVACDashboard() {
                     <span style={{
                       fontFamily: "'Orbitron',monospace", fontSize: 66, fontWeight: 700, lineHeight: 0.95,
                       color: t.color, textShadow: `0 0 16px ${t.color}70, 0 0 44px ${t.color}25`,
-                      // tabular-nums equalises digit WIDTHS but not digit COUNT —
-                      // 71 -> 100, or a minus sign appearing, still reshuffles the
-                      // row. Reserve the width of the widest value (3 chars) and
-                      // right-align so the numeral grows leftward into dead space
-                      // instead of shoving the label. Same fix as the flap %.
-                      fontVariantNumeric: "tabular-nums",
-                      minWidth: 132, textAlign: "right",
-                    }}>{Math.round(t.val)}</span>
+                      // Two separate problems. <Digits> fixes varying digit
+                      // WIDTH (Orbitron's "1" is half-width); minWidth fixes
+                      // varying digit COUNT (71 -> 100, or a minus sign on the
+                      // exterior reading). 3 cells at 66px = 165px, measured.
+                      minWidth: 168, textAlign: "right",
+                    }}><Digits value={Math.round(t.val)} size={66} /></span>
                     <span style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 26, fontWeight: 600,
                       color: C.mid }}>°F</span>
                   </div>
@@ -709,8 +726,7 @@ export default function HVACDashboard() {
                   fontFamily: "'Orbitron',monospace", fontSize: 210, fontWeight: 800,
                   color: spColor, lineHeight: 0.9,
                   textShadow: `0 0 24px ${spColor}70, 0 0 80px ${spColor}30`,
-                  fontVariantNumeric: "tabular-nums",
-                }}>{Math.round(setpoint)}</span>
+                }}><Digits value={Math.round(setpoint)} size={210} /></span>
                 <span style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 52, fontWeight: 600,
                   color: C.mid }}>°F</span>
               </div>
@@ -724,7 +740,7 @@ export default function HVACDashboard() {
                   the setpoint crosses 80F, which auto-engages heat and flips
                   VENTILATION (11 chars) to HEATING (7), jumping ~90px. */}
               <div style={{
-                marginTop: 8, padding: "7px 34px", borderRadius: 6, minWidth: 360,
+                marginTop: 8, padding: "7px 34px", borderRadius: 6, minWidth: 380,
                 border: `1px solid ${modeColor}55`, background: `${modeColor}0e`,
               }}>
                 <span style={{
