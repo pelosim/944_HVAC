@@ -640,7 +640,13 @@ export default function HVACDashboard() {
                     <span style={{
                       fontFamily: "'Orbitron',monospace", fontSize: 66, fontWeight: 700, lineHeight: 0.95,
                       color: t.color, textShadow: `0 0 16px ${t.color}70, 0 0 44px ${t.color}25`,
+                      // tabular-nums equalises digit WIDTHS but not digit COUNT —
+                      // 71 -> 100, or a minus sign appearing, still reshuffles the
+                      // row. Reserve the width of the widest value (3 chars) and
+                      // right-align so the numeral grows leftward into dead space
+                      // instead of shoving the label. Same fix as the flap %.
                       fontVariantNumeric: "tabular-nums",
+                      minWidth: 132, textAlign: "right",
                     }}>{Math.round(t.val)}</span>
                     <span style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 26, fontWeight: 600,
                       color: C.mid }}>°F</span>
