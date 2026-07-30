@@ -9,6 +9,11 @@ import { useState, useEffect, useCallback, useRef } from "react";
 // Every band stretches edge-to-edge. No dead space.
 // ═══════════════════════════════════════════════════════════════
 
+// The physical panel. Everything is laid out at exactly this size and then
+// scaled to fit — never reflowed. See the stage wrapper in the render.
+const DESIGN_W = 1920;
+const DESIGN_H = 720;
+
 const C = {
   bg: "#04070a",
   fascia: "#0a0e13",
@@ -291,6 +296,7 @@ export default function HVACDashboard() {
   const [adsOk, setAdsOk] = useState(false);
   const [controlActive, setControlActive] = useState(false);
   const [time, setTime] = useState(new Date());
+  const [stageScale, setStageScale] = useState(1);
   const [idriveMode, setIdriveMode] = useState("media");
   const [idriveDetents, setIdriveDetents] = useState(0);
   const [idriveAction, setIdriveAction] = useState("");
@@ -380,6 +386,15 @@ export default function HVACDashboard() {
   useEffect(() => {
     const iv = setInterval(() => setTime(new Date()), 1000);
     return () => clearInterval(iv);
+  }, []);
+
+  // Fit the fixed 1920x720 stage into whatever viewport we are in.
+  useEffect(() => {
+    const fit = () => setStageScale(Math.min(
+      window.innerWidth / DESIGN_W, window.innerHeight / DESIGN_H));
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
   }, []);
 
   // ─── Commands ─────────────────────────────────────────────
@@ -492,10 +507,24 @@ export default function HVACDashboard() {
         .band{animation:powerOn 0.8s ease both}
       `}</style>
 
+      {/* Fixed-size stage, scaled to fit whatever viewport it lands in.
+          The panel is exactly 1920x720, so the layout is ALWAYS computed at
+          that size and then scaled — never reflowed. Without this the root
+          was width:100%, so in any window narrower than 1920 the BAND 2
+          columns (400px temps, 190px knob mirror) were over-subscribed and
+          shrank; flex then redistributed on every content change, which is
+          what made the whole screen twitch when a value changed. On the real
+          panel the scale is exactly 1, so this is a no-op there — and in a
+          browser it now previews pixel-faithfully. */}
       <div style={{
-        width: "100%", height: "100%",
+        width: "100%", height: "100%", overflow: "hidden", background: C.bg,
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }}>
+      <div style={{
+        width: DESIGN_W, height: DESIGN_H, flex: "0 0 auto",
+        transform: `scale(${stageScale})`, transformOrigin: "center center",
         display: "grid", gridTemplateRows: "70px 1fr 240px",
-        background: C.bg, color: C.text, fontFamily: "'Rajdhani',sans-serif",
+        color: C.text, fontFamily: "'Rajdhani',sans-serif",
         position: "relative", overflow: "hidden",
       }}>
         {/* glass + scanline atmosphere over everything */}
@@ -934,6 +963,7 @@ export default function HVACDashboard() {
             </div>
           </div>
         </div>
+      </div>
       </div>
     </>
   );
