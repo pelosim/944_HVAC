@@ -198,8 +198,8 @@ footer{margin-top:56px;padding-top:20px;border-top:1px solid var(--line);
   <code>hvac_backend.py</code>, <code>idrive_controller.ino</code>, and
   <code>pwm_controller.ino</code>.</p>
   <div class="stamp">
-    <span>5 modules on the bench</span>
-    <span>3 boards on the Pi USB hub</span>
+    <span>6 modules</span>
+    <span>4 ESP32s on the Pi USB hub</span>
     <span>generated 2026-07-30</span>
   </div>
 </header>
@@ -502,8 +502,10 @@ lighting output board, which is also driven by its own knob over ESP-NOW.</desc>
             <td class="mono">—</td><td>udev by MAC D0:CF:13:24:DB:B8</td></tr>
         <tr><td class="mono">/dev/lighting</td><td class="mono">ttyACM0</td><td>Lighting board</td>
             <td class="mono">115200</td><td>udev by MAC 3C:DC:75:40:0B:F0</td></tr>
-        <tr><td class="mono">/dev/gauges</td><td class="mono">ttyACM2</td><td>Gauge panel (primary)</td>
-            <td class="mono">—</td><td>console + flashing only; no protocol yet</td></tr>
+        <tr><td class="mono">/dev/gauges1</td><td class="mono">ttyACM2</td><td>Gauge panel A (master)</td>
+            <td class="mono">—</td><td>console + flashing; no Pi protocol yet</td></tr>
+        <tr><td class="mono">/dev/gauges2</td><td class="mono">ttyACM3</td><td>Gauge panel B (slave)</td>
+            <td class="mono">—</td><td>named only — no firmware assembled</td></tr>
       </tbody>
     </table>
   </div>
@@ -796,6 +798,102 @@ ch  1 = strip brightness   2 = MOSFET dimmer
     A pot wired where a motor belongs will be destroyed the instant an H-bridge drives it.</p>
     <p>Colours here are transcribed from a scan. Buzz each one out at the connector
     before you commit — the sheet is the map, the meter is the territory.</p>
+  </div>
+</section>
+
+<section id="addresses">
+  <div class="sechead"><span class="n">10</span><h2>Address registry</h2></div>
+  <p>Every identity in the system, in one place. The ESP32-S3 reports its MAC as
+  its USB serial, so the same string identifies a board on the bench, on the hub,
+  and over ESP-NOW — which is what makes a single registry possible at all.</p>
+
+  <h3>ESP32 boards</h3>
+  <div class="tablewrap">
+    <table>
+      <thead><tr>
+        <th>Board</th><th>MAC / USB serial</th><th>Port</th><th>Toolchain</th><th>Firmware</th>
+      </tr></thead>
+      <tbody>
+        <tr><td><b>iDrive controller</b><br/><span class="mono">Lonely Binary N16R8</span></td>
+            <td class="mono">D0:CF:13:24:DB:B8</td>
+            <td class="mono">/dev/idrive</td>
+            <td class="mono">core 3.3.10</td>
+            <td class="mono">idrive_controller v1.6.0</td></tr>
+        <tr><td><b>Lighting output</b><br/><span class="mono">Lonely Binary N16R8</span></td>
+            <td class="mono">3C:DC:75:40:0B:F0</td>
+            <td class="mono">/dev/lighting</td>
+            <td class="mono">core 2.0.14</td>
+            <td class="mono">pwm_controller</td></tr>
+        <tr><td><b>Gauge panel A</b> — master<br/><span class="mono">T-Display-S3-Long #1</span></td>
+            <td class="mono">68:EE:8F:48:19:9C</td>
+            <td class="mono">/dev/gauges1<br/>/dev/gauges</td>
+            <td class="mono">core 2.0.14</td>
+            <td class="mono">gauge_bench</td></tr>
+        <tr><td><b>Gauge panel B</b> — slave<br/><span class="mono">T-Display-S3-Long #2</span></td>
+            <td class="mono">68:EE:8F:48:18:D4</td>
+            <td class="mono">/dev/gauges2</td>
+            <td class="mono">core 2.0.14</td>
+            <td class="mono">none yet</td></tr>
+        <tr><td><b>Lighting knob</b><br/><span class="mono">CrowPanel 1.28"</span></td>
+            <td class="mono">not on the hub</td>
+            <td class="mono">—</td>
+            <td class="mono">core 2.0.14</td>
+            <td class="mono">display_controller</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note">
+    <p><strong>The two gauge panels are near-sequential MACs from one batch</strong>
+    — <code>…19:9C</code> and <code>…18:D4</code>. Only the full serial tells them
+    apart, which is exactly why every board is pinned by serial rather than by
+    vendor. Adding the hub already reshuffled <code>ttyACM</code> numbering once.</p>
+  </div>
+
+  <h3>Hosts and services</h3>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Name</th><th>Address</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>HVAC Pi — hostname</td><td class="mono">944HVACPi</td>
+            <td>ssh alias <code>pi944</code>, user <code>mark</code></td></tr>
+        <tr><td>HVAC Pi — eth0</td><td class="mono">192.168.1.142</td>
+            <td>DHCP; has moved before — prefer the hostname</td></tr>
+        <tr><td>HVAC Pi — wlan0</td><td class="mono">192.168.1.240</td>
+            <td>DHCP</td></tr>
+        <tr><td>mDNS</td><td class="mono">944HVACPi.local</td>
+            <td>unreliable — has cached stale leases and resolves to a dead
+                IPv6 record; use <code>ssh -4</code></td></tr>
+        <tr><td>Dashboard</td><td class="mono">http://944HVACPi.local:8000</td>
+            <td>WebSocket at <code>/ws</code>, REST at <code>/api/state</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Protocol identifiers</h3>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Bus</th><th>Identifier</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td>CAN</td><td class="mono">0x25B</td><td>iDrive — all 14 inputs, 500 kbps</td></tr>
+        <tr><td>CAN</td><td class="mono">0x202 / 0x563 / 0x0AA / 0x130 / 0x440 / 0x560</td>
+            <td>keep-alives the iDrive needs to stay awake</td></tr>
+        <tr><td>CAN</td><td class="mono">0x5E7 &rarr; 0x273</td><td>init handshake, reply format unconfirmed</td></tr>
+        <tr><td>IR</td><td class="mono">NEC addr 0x00</td>
+            <td>cmds 0x02 vol+ · 0x98 vol− · 0xE2 mute · 0x90 next · 0xE0 prev</td></tr>
+        <tr><td>ESP-NOW</td><td class="mono">0xAA / 0xBB</td>
+            <td>knob&rarr;output / output&rarr;knob, 4-byte packets</td></tr>
+        <tr><td>I²C</td><td class="mono">0x48</td><td>ADS1115 — on the Pi <em>and</em> on gauge panel A</td></tr>
+        <tr><td>1-Wire</td><td class="mono">bd3d51 / be5d11 / bbdd26</td>
+            <td>DS18B20 duct / exterior / cabin — no <code>28-</code> prefix</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note stop">
+    <p><strong>Panel B has no firmware and must not be flashed with panel A's.</strong>
+    <code>slave_app.h</code> is an app layer waiting to be dropped into a copy of
+    LilyGo's <code>lvgl_demo</code>; that sketch has not been assembled. Panel A's
+    <code>gauge_bench</code> drives an ADS1115 that panel B does not have —
+    <code>flash-via-pi.sh gauges2</code> refuses for exactly this reason.</p>
   </div>
 </section>
 
