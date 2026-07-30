@@ -128,6 +128,10 @@ ADC_MV_MAX = 4090    # mV at 100% position (flap fully other way)
 ### To swap or change a channel:
 Just change the channel number (0–3). Restart backend.
 
+> A **second** ADS1115 at `0x49` is planned for the ADXL335 accelerometer that
+> drives the G-meter — wiring, addressing and calibration are in
+> [`ACCELEROMETER_WIRING.md`](ACCELEROMETER_WIRING.md).
+
 ### To use the spare CH3:
 1. Add: `ADS_NEW_CHANNEL = 3`
 2. The `_init_ads()` method already reads all enabled channels
