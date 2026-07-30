@@ -34,8 +34,11 @@ def load_from_backend():
     if not method_src:
         sys.exit("could not find apply_idrive_event in hvac_backend.py")
 
+    lighting_sent = []
     ns = {"dataclass": dataclass, "field": field, "asdict": asdict,
-          "json": json, "time": time, "Optional": object}
+          "json": json, "time": time, "Optional": object,
+          "lighting_send": lighting_sent.append, "LIGHT_STEP": 8,
+          "_sent": lighting_sent}
     exec(state_src, ns)
     # get_source_segment returns a ClassDef without its decorators, so the
     # extracted class arrives undecorated — reapply @dataclass by hand or
@@ -59,10 +62,10 @@ def load_from_backend():
          "    def _save_state(self):\n"
          "        self.saves += 1\n"
          + body, ns)
-    return ns["HVACState"], ns["Ctl"]
+    return ns["HVACState"], ns["Ctl"], lighting_sent
 
 
-HVACState, Ctl = load_from_backend()
+HVACState, Ctl, LIGHTING_SENT = load_from_backend()
 
 failures = 0
 
@@ -182,6 +185,39 @@ blob = json.loads(c.state.to_json())
 for k in ("idrive_mode", "idrive_detents", "idrive_action",
           "idrive_active", "idrive_last_s"):
     check(k in blob, f"{k} present in the state broadcast")
+
+print("\nTest 11: lighting is driven by RELATIVE commands only")
+c = new(); LIGHTING_SENT.clear()
+c.apply_idrive_event(evt("LIGHT_BRIGHTER", 3, mode="ILLUM"))
+check(LIGHTING_SENT == ["L ADJ 1 24"], f"3 detents -> one +24 adjust, got {LIGHTING_SENT}")
+LIGHTING_SENT.clear()
+c.apply_idrive_event(evt("LIGHT_DIMMER", 2, mode="ILLUM"))
+check(LIGHTING_SENT == ["L ADJ 1 -16"], f"dimmer sends negative, got {LIGHTING_SENT}")
+LIGHTING_SENT.clear()
+c.apply_idrive_event(evt("LIGHT_SCENE_NEXT", mode="ILLUM"))
+c.apply_idrive_event(evt("LIGHT_SCENE_PREV", mode="ILLUM"))
+c.apply_idrive_event(evt("LIGHT_TOGGLE", mode="ILLUM"))
+check(LIGHTING_SENT == ["L ADJ 5 1", "L ADJ 5 -1", "L ADJ 3 1"],
+      f"scene and dome map correctly, got {LIGHTING_SENT}")
+check(not any(cmd.startswith("L SET") for cmd in
+              ["L ADJ 1 24", "L ADJ 1 -16"]), "never sends an absolute SET")
+
+print("\nTest 12: lighting actions never touch HVAC state")
+c = new(); LIGHTING_SENT.clear()
+before = (c.state.setpoint_f, c.state.fan_speed, c.state.aux_display)
+for a in ("LIGHT_BRIGHTER", "LIGHT_DIMMER", "LIGHT_TOGGLE",
+          "LIGHT_SCENE_NEXT", "LIGHT_SCENE_PREV"):
+    c.apply_idrive_event(evt(a, mode="ILLUM"))
+check(c.commands == [], "no HVAC command issued")
+check((c.state.setpoint_f, c.state.fan_speed, c.state.aux_display) == before,
+      "setpoint / fan / aux untouched")
+check(c.state.idrive_mode == "illum", "but the mirror tracks ILLUM mode")
+
+print("\nTest 13: the backend never caches absolute lighting brightness")
+c = new(); LIGHTING_SENT.clear()
+c.apply_idrive_event(evt("LIGHT_BRIGHTER", 5, mode="ILLUM"))
+check(c.state.illum_ch1 == 0,
+      "illum_ch1 stays at its reported value - only the board sets it")
 
 print(f"\n{'ALL TESTS PASSED' if not failures else 'FAILED'} "
       f"({failures} failure{'' if failures == 1 else 's'})")

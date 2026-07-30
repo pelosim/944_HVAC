@@ -235,6 +235,17 @@ class HVACState:
     idrive_active: bool = False       # True briefly after any knob input
     idrive_last_s: float = 0.0        # monotonic stamp of the last event
 
+    # ── Interior lighting (ESP32 output board, over USB) ──────────
+    # The lighting board owns these values; we only mirror what it
+    # reports. Commands sent to it are relative ("brighter"), never
+    # absolute, so the round knob and the iDrive cannot disagree.
+    illum_online: bool = False        # serial link to the board is up
+    illum_ch1: int = 0                # ambient strip brightness 0-255
+    illum_ch2: int = 0                # switch dimmer brightness 0-255
+    illum_color: int = 0              # palette index 0-9
+    illum_relay: bool = False         # dome light
+    illum_night: bool = False         # illumination sense: headlights on
+
     def to_json(self):
         return json.dumps(asdict(self))
 
@@ -736,6 +747,22 @@ class HVACController:
             # Dedicated button: swap the round screen clock <-> G-meter.
             cmd["aux_display"] = "gmeter" if self.state.aux_display == "clock" else "clock"
 
+        # ── Interior lighting ─────────────────────────────────────
+        # Sent as RELATIVE adjustments. We deliberately do not track or
+        # send absolute brightness: the lighting board owns that value and
+        # the round knob can change it at any time, so anything we cached
+        # would be wrong the moment it did.
+        elif action == "LIGHT_BRIGHTER":
+            lighting_send(f"L ADJ 1 {LIGHT_STEP * count}")
+        elif action == "LIGHT_DIMMER":
+            lighting_send(f"L ADJ 1 {-LIGHT_STEP * count}")
+        elif action == "LIGHT_SCENE_NEXT":
+            lighting_send("L ADJ 5 1")
+        elif action == "LIGHT_SCENE_PREV":
+            lighting_send("L ADJ 5 -1")
+        elif action == "LIGHT_TOGGLE":
+            lighting_send("L ADJ 3 1")      # any nudge toggles the dome relay
+
         # MEDIA actions (volume/mute/track) and the LIGHT/GAUGE modes are
         # reported for the mirror but have no backend command yet — the
         # head unit is driven by IR, not by the Pi.
@@ -907,6 +934,88 @@ connected_clients = set()
 # The knob is a convenience; climate control must never depend on it.
 IDRIVE_PORT = "/dev/serial0"
 IDRIVE_BAUD = 115200
+
+# ── Interior lighting board ────────────────────────────────────
+# ESP32 output board on USB (stable name from the udev rule). We send
+# RELATIVE commands only — the board owns the real brightness and reports
+# it back, so this end never has to guess and can never drift from the
+# round knob. Protocol lives in the lighting repo's pwm_controller.ino.
+LIGHTING_PORT = "/dev/lighting"
+LIGHTING_BAUD = 115200
+LIGHT_STEP    = 8          # brightness units per knob detent (0-255 range)
+
+_lighting_port = None                    # serial.Serial when the link is up
+_lighting_lock = threading.Lock()
+
+
+def lighting_send(line: str):
+    """Send one command line to the lighting board, if it is connected."""
+    with _lighting_lock:
+        port = _lighting_port
+    if port is None:
+        log.debug("lighting: %s dropped — link down", line)
+        return
+    try:
+        port.write((line + "\n").encode())
+    except Exception as e:
+        log.warning("lighting: write failed: %s", e)
+
+
+def lighting_reader_loop():
+    """Read state reports from the lighting board and mirror them."""
+    global _lighting_port
+    try:
+        import serial
+    except ImportError:
+        log.warning("lighting link disabled — pyserial not installed")
+        return
+
+    complained = False
+    while True:
+        try:
+            port = serial.Serial(LIGHTING_PORT, LIGHTING_BAUD, timeout=1)
+            with _lighting_lock:
+                _lighting_port = port
+            controller.state.illum_online = True
+            complained = False
+            log.info("lighting link up on %s", LIGHTING_PORT)
+            port.write(b"L GET\n")        # ask for current state on connect
+
+            # readline(), never `for line in port` — iteration ends the
+            # moment a read times out, which idle guarantees.
+            while True:
+                raw = port.readline()
+                if not raw:
+                    continue
+                line = raw.decode("utf-8", errors="replace").strip()
+                # The board shares this port with its own diagnostic prints;
+                # only JSON objects are protocol.
+                if not line.startswith("{"):
+                    continue
+                try:
+                    evt = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if evt.get("src") != "illum":
+                    continue
+                st = controller.state
+                try:
+                    st.illum_ch1   = int(evt.get("ch1", st.illum_ch1))
+                    st.illum_ch2   = int(evt.get("ch2", st.illum_ch2))
+                    st.illum_color = int(evt.get("color", st.illum_color))
+                    st.illum_relay = bool(int(evt.get("relay", st.illum_relay)))
+                    st.illum_night = bool(int(evt.get("night", st.illum_night)))
+                except (TypeError, ValueError):
+                    log.debug("lighting: unparseable report %r", line[:80])
+        except Exception as e:
+            with _lighting_lock:
+                _lighting_port = None
+            controller.state.illum_online = False
+            if not complained:
+                log.warning("lighting link unavailable (%s): %s — retrying",
+                            LIGHTING_PORT, e)
+                complained = True
+            time.sleep(5)
 # IDRIVE_ACTIVE_S lives with the other loop constants near the top.
 
 
@@ -959,6 +1068,8 @@ async def startup():
     asyncio.create_task(control_loop())
     threading.Thread(target=idrive_reader_loop, daemon=True,
                      name="idrive-reader").start()
+    threading.Thread(target=lighting_reader_loop, daemon=True,
+                     name="lighting-reader").start()
     log.info("HVAC controller started — %s mode", "SIMULATION" if SIMULATE else "HARDWARE")
 
 

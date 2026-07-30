@@ -208,7 +208,7 @@ const IDRIVE_MODES = {
   gauge: { label: "GAUGE", color: C.ice,     param: "AUX PAGE" },
 };
 
-function KnobMirror({ mode, detents, action, active, setpoint, auxDisplay }) {
+function KnobMirror({ mode, detents, action, active, setpoint, auxDisplay, illumCh1 }) {
   const m = IDRIVE_MODES[mode] || IDRIVE_MODES.radio;
   const tint = active ? m.color : C.dim;
   const ticks = 24;
@@ -217,6 +217,7 @@ function KnobMirror({ mode, detents, action, active, setpoint, auxDisplay }) {
   let value = "—";
   if (mode === "hvac") value = `${Math.round(setpoint)}°`;
   else if (mode === "gauge") value = auxDisplay === "gmeter" ? "G" : "CLK";
+  else if (mode === "illum") value = `${Math.round((illumCh1 / 255) * 100)}%`;
   else if (mode === "radio") {
     if (action === "VOL_UP") value = "▲";
     else if (action === "VOL_DOWN") value = "▼";
@@ -321,6 +322,7 @@ export default function HVACDashboard() {
   const [idriveDetents, setIdriveDetents] = useState(0);
   const [idriveAction, setIdriveAction] = useState("");
   const [idriveActive, setIdriveActive] = useState(false);
+  const [illumCh1, setIllumCh1] = useState(0);
 
   const sendCmd = useCallback((cmd) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -372,6 +374,7 @@ export default function HVACDashboard() {
           apply("idrive_detents", setIdriveDetents);
           apply("idrive_action", setIdriveAction);
           apply("idrive_active", setIdriveActive);
+          apply("illum_ch1", setIllumCh1);
           apply("mix_flap_pos", setMixFlap);
           apply("defrost_flap_pos", setDefrostFlap);
           apply("footwell_flap_pos", setFootFlap);
@@ -857,7 +860,8 @@ export default function HVACDashboard() {
 
           {/* — iDrive knob mirror (right) — */}
           <KnobMirror mode={idriveMode} detents={idriveDetents} action={idriveAction}
-            active={idriveActive} setpoint={setpoint} auxDisplay={auxDisplay} />
+            active={idriveActive} setpoint={setpoint} auxDisplay={auxDisplay}
+            illumCh1={illumCh1} />
         </div>
 
         {/* ════ BAND 3 — CONTROL RAIL ════ */}
