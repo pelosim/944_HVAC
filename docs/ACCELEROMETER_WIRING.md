@@ -70,6 +70,15 @@ DS3231 RTC (see `deploy/setup-rtc.sh`), so there's no conflict.
 Tap the same SDA/SCL/3V3/GND the existing ADS1115 uses — the Freenove breakout
 HAT makes this tidy.
 
+> **VCC vs VDD — same thing.** Both are just "positive supply in". The names are
+> historical (VCC = bipolar *collector*, VDD = CMOS *drain*); board vendors use
+> them interchangeably. The GY-61 silkscreen says `VCC`, the ADS1115 says `VDD`,
+> and both tie to the Pi's 3V3 rail.
+>
+> **Check your board's pin order before wiring.** GY-61 variants differ — some
+> run VCC/X/Y/Z/GND, others the reverse. Reversing VCC and GND will destroy the
+> sensor. Go by the silkscreen, not by position.
+
 ### ⚠ Power the ADXL335 from 3.3 V, not 5 V
 
 The ADXL335's outputs are **ratiometric** — the zero-g point and the volts-per-g
