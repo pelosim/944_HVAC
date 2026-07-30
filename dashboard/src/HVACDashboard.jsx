@@ -202,14 +202,14 @@ function FlapTrack({ actual, target, base, dirColor, dir, n = 22, h = 16 }) {
 // so MEDIA mode reports the direction of travel rather than inventing
 // a number.
 const IDRIVE_MODES = {
-  media: { label: "MEDIA", color: C.vfd,   param: "VOLUME" },
-  hvac:  { label: "HVAC",  color: C.amber, param: "SETPOINT" },
-  light: { label: "LIGHT", color: "#9c40ff", param: "BRIGHTNESS" },
-  gauge: { label: "GAUGE", color: C.ice,   param: "AUX PAGE" },
+  radio: { label: "RADIO", color: C.vfd,     param: "VOLUME" },
+  hvac:  { label: "HVAC",  color: C.amber,   param: "SETPOINT" },
+  illum: { label: "ILLUM", color: "#9c40ff", param: "BRIGHTNESS" },
+  gauge: { label: "GAUGE", color: C.ice,     param: "AUX PAGE" },
 };
 
 function KnobMirror({ mode, detents, action, active, setpoint, auxDisplay }) {
-  const m = IDRIVE_MODES[mode] || IDRIVE_MODES.media;
+  const m = IDRIVE_MODES[mode] || IDRIVE_MODES.radio;
   const tint = active ? m.color : C.dim;
   const ticks = 24;
   const angle = (detents % ticks) * (360 / ticks);
@@ -217,7 +217,7 @@ function KnobMirror({ mode, detents, action, active, setpoint, auxDisplay }) {
   let value = "—";
   if (mode === "hvac") value = `${Math.round(setpoint)}°`;
   else if (mode === "gauge") value = auxDisplay === "gmeter" ? "G" : "CLK";
-  else if (mode === "media") {
+  else if (mode === "radio") {
     if (action === "VOL_UP") value = "▲";
     else if (action === "VOL_DOWN") value = "▼";
     else if (action === "MUTE") value = "MUTE";
@@ -317,7 +317,7 @@ export default function HVACDashboard() {
   const [controlActive, setControlActive] = useState(false);
   const [time, setTime] = useState(new Date());
   const [stageScale, setStageScale] = useState(1);
-  const [idriveMode, setIdriveMode] = useState("media");
+  const [idriveMode, setIdriveMode] = useState("radio");
   const [idriveDetents, setIdriveDetents] = useState(0);
   const [idriveAction, setIdriveAction] = useState("");
   const [idriveActive, setIdriveActive] = useState(false);

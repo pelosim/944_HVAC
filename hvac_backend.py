@@ -229,7 +229,7 @@ class HVACState:
     # client; these fields exist only so the dashboard can mirror the
     # physical knob on screen — which mode it is in, what it owns, and
     # how far it has been turned.
-    idrive_mode: str = "media"        # media | hvac | light | gauge
+    idrive_mode: str = "radio"        # radio | hvac | illum | gauge
     idrive_detents: int = 0           # signed running total; rotates the mirror
     idrive_action: str = ""           # last action name, for the caption
     idrive_active: bool = False       # True briefly after any knob input
@@ -700,7 +700,11 @@ class HVACController:
         except (TypeError, ValueError):
             count = 1
 
-        if mode in ("media", "hvac", "light", "gauge"):
+        # Accept the pre-rename names too. The ESP32 and the Pi are separate
+        # deployments and can be updated hours apart, so the link must not
+        # break just because one side is newer than the other.
+        mode = {"media": "radio", "light": "illum"}.get(mode, mode)
+        if mode in ("radio", "hvac", "illum", "gauge"):
             self.state.idrive_mode = mode
         self.state.idrive_action = action
         self.state.idrive_last_s = time.monotonic()
