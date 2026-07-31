@@ -1010,9 +1010,11 @@ IDRIVE_BAUD = 115200
 
 # A link is "online" if it has said anything at all within this window. The
 # iDrive firmware heartbeats every 2 s, the lighting board and the bridge are
-# polled, so a silence longer than this is a real fault rather than an idle
-# user. Deliberately generous — a false red is as bad as a false green.
-LINK_STALE_S = 6.0
+# polled at the same rate, so measured age tops out just under 2 s and this is
+# five missed messages rather than one. Deliberately generous: a false red is
+# as bad as a false green, and nothing here needs sub-second fault detection.
+# The cost of the margin is that a genuine dead link takes this long to show.
+LINK_STALE_S = 10.0
 
 # Monotonic stamp of the last line received from each link. Written by the
 # reader threads, read by tick(). Plain floats: assignment is atomic under the
@@ -1031,9 +1033,19 @@ def _mark_rx(link: str):
 
 
 def _age_of(link: str, now: float) -> float:
-    """Seconds since this link last spoke, or -1 if it never has."""
+    """Seconds since this link last spoke, or -1 if it never has.
+
+    Clamped at zero. tick() samples `now` once at the top and then spends
+    real time reading sensors, so a reader thread can stamp _last_rx with a
+    LATER timestamp before we get here — giving a small negative age. The
+    freshness test is `0 <= age < LINK_STALE_S`, so that negative value
+    failed the lower bound and flashed the link offline for one frame,
+    roughly once per poll cycle. Measured at -0.01 to -0.03 s.
+    """
     t = _last_rx[link]
-    return (now - t) if t > 0 else -1.0
+    if t <= 0:
+        return -1.0
+    return max(0.0, now - t)
 
 # ── Interior lighting board ────────────────────────────────────
 # ESP32 output board on USB (stable name from the udev rule). We send

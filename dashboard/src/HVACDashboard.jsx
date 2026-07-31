@@ -338,6 +338,36 @@ function SysLink({ d, st, label, lx, ly }) {
   );
 }
 
+// The knob's mode, mirrored here on purpose. You may well be reading this
+// page while the knob is pointed at the lighting board or the TunerStudio
+// dash, and without this there is nothing on screen telling you which — so
+// a turn would go somewhere you did not expect. Colours match the
+// controller's own NeoPixel exactly, so the LED in your hand and the badge
+// on the screen always agree.
+const MODE_TINT = {
+  radio:  "#2CE8D8",   // phosphor teal
+  hvac:   "#FFB000",   // amber
+  illum:  "#9C40FF",   // violet
+  gauge:  "#5CB8FF",   // ice blue
+  tsdash: "#3AFF8C",   // spring green
+};
+
+function KnobBadge({ mode, action, active }) {
+  const tint = MODE_TINT[mode] || C.mid;
+  return (
+    <g>
+      <rect x="700" y="24" width="520" height="46" rx="8"
+        fill={active ? `${tint}1A` : "none"} stroke={tint} strokeWidth={active ? 3 : 2} />
+      <text x="726" y="54" fontFamily="'Rajdhani',sans-serif" fontSize="19"
+        fill={C.mid} letterSpacing="2">KNOB</text>
+      <text x="806" y="54" fontFamily="'Orbitron',monospace" fontSize="25"
+        fontWeight="800" fill={tint}>{(mode || "?").toUpperCase()}</text>
+      <text x="1196" y="53" textAnchor="end" fontFamily="'Rajdhani',sans-serif"
+        fontSize="18" fill={C.dim}>{action || "—"}</text>
+    </g>
+  );
+}
+
 function SystemStatus({ st, onClose }) {
   // ── Derive each link's state from what the backend can actually see ──
   const flapFault = st.mixFault || st.defFault || st.footFault;
@@ -398,6 +428,7 @@ function SystemStatus({ st, onClose }) {
           fontWeight="800" fill={C.vfd} letterSpacing="3">SYSTEM STATUS</text>
         <text x="44" y="77" fontFamily="'Rajdhani',sans-serif" fontSize="19"
           fill={C.mid} letterSpacing="3">LINK TOPOLOGY - LIVE</text>
+        <KnobBadge mode={st.idriveMode} action={st.idriveAction} active={st.idriveActive} />
         <text x="1876" y="48" textAnchor="end" fontFamily="'Orbitron',monospace"
           fontSize="30" fontWeight="800" fill={nBad ? C.red : C.green}>
           {nBad ? `${nBad} FAULT${nBad > 1 ? "S" : ""}` : "ALL LINKS OK"}
@@ -410,14 +441,14 @@ function SystemStatus({ st, onClose }) {
         {/* links */}
         <SysLink d="M296,146 L336,146"   st={L.can}    label="CAN"  lx={316} ly={136} />
         <SysLink d="M596,146 L636,146"   st={L.ir}     label="IR"   lx={616} ly={136} />
-        <SysLink d="M466,182 L466,246"   st={L.uart}   label="UART" lx={506} ly={220} />
+        <SysLink d="M466,178 L466,246"   st={L.uart}   label="UART" lx={506} ly={220} />
         <SysLink d="M596,286 L636,250"   st={L.hw} />
         <SysLink d="M596,306 L636,330"   st={L.panel} />
         <SysLink d="M596,326 L636,410"   st={L.aux} />
-        <SysLink d="M466,350 L466,552"   st={L.light}  label="USB"  lx={504} ly={470} />
+        <SysLink d="M466,350 L466,556"   st={L.light}  label="USB"  lx={504} ly={470} />
         <SysLink d="M596,330 L636,494"   st={L.bridge} />
         <SysLink d="M896,522 L936,522"   st={L.hid}    label="HID"  lx={916} ly={506} />
-        <SysLink d="M1496,522 L1456,522" st={L.ms3}    label="FTDI" lx={1476} ly={506} />
+        <SysLink d="M1456,522 L1196,522" st={L.ms3}    label="FTDI" lx={1326} ly={506} />
         <SysLink d="M296,588 L336,588"   st={L.espnow} label="NOW"  lx={316} ly={578} />
         <SysLink d="M596,588 L636,588"   st={L.light} />
 
@@ -777,7 +808,7 @@ export default function HVACDashboard() {
           <SystemStatus
             onClose={cmdCloseSystem}
             st={{
-              idriveOnline, idriveAge, idriveAction,
+              idriveOnline, idriveAge, idriveAction, idriveMode, idriveActive,
               illumOnline, illumAge,
               tsdashOnline, tsdashAge, tsdashInit, tsdashUsb,
               onewireOk, adsOk, wsConnected, uptime,
