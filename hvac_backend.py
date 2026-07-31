@@ -253,6 +253,7 @@ class HVACState:
     # tsdash_send() for why.
     tsdash_online: bool = False       # serial link to the bridge is up
     tsdash_last: str = ""             # last command sent, for the mirror
+    tsdash_mac: str = ""              # MAC the bridge reports; see TSDASH_MAC
 
     def to_json(self):
         return json.dumps(asdict(self))
@@ -1062,6 +1063,19 @@ def lighting_reader_loop():
 TSDASH_PORT = "/dev/tsdash"
 TSDASH_BAUD = 115200
 
+# The bridge is the ONE board here that udev cannot pin by MAC. We reach it
+# through its UART port, where the host enumerates a CH340 — a separate
+# chip with its own descriptor, no knowledge of the ESP32's MAC, and (on
+# this unit, checked 2026-07-31) no serial number of its own either. So
+# /dev/tsdash is pinned to a physical hub port and follows the SOCKET, not
+# the board: move the cable and the symlink points at whatever is there now.
+#
+# The firmware therefore reports its MAC in every status line, and we check
+# it. This is not paranoia — the bridge is 3C:DC:75:40:0B:D8 and the
+# lighting board is 3C:DC:75:40:0B:F0, same batch, differing in the last
+# byte. Exactly the trap already documented for the two gauge panels.
+TSDASH_MAC = "3C:DC:75:40:0B:D8"
+
 _tsdash_port = None                      # serial.Serial when the link is up
 _tsdash_lock = threading.Lock()
 
@@ -1124,6 +1138,23 @@ def tsdash_reader_loop():
                     continue
                 if evt.get("src") != "dash":
                     continue
+
+                # Identity check. Warn loudly but keep working: a wrong
+                # board will not understand "D NEXT" anyway, so the failure
+                # is inert, and refusing to run would turn any future
+                # firmware change into a dead feature. The point is that a
+                # moved cable leaves a trace instead of being silent.
+                mac = str(evt.get("mac", ""))
+                if mac and mac != controller.state.tsdash_mac:
+                    controller.state.tsdash_mac = mac
+                    if mac != TSDASH_MAC:
+                        log.warning(
+                            "tsdash: %s is board %s, expected %s — /dev/tsdash "
+                            "is pinned to a hub PORT, so a moved cable points "
+                            "it at a different board", TSDASH_PORT, mac, TSDASH_MAC)
+                    else:
+                        log.info("tsdash: board %s confirmed", mac)
+
                 # usb=0 means the bridge is powered and listening to us but
                 # the TSDash Pi has not enumerated it — keystrokes go
                 # nowhere. Worth a log line; not worth refusing to send.
