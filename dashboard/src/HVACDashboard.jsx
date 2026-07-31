@@ -343,7 +343,11 @@ function SystemStatus({ st, onClose }) {
   const flapFault = st.mixFault || st.defFault || st.footFault;
   const L = {
     can:    st.idriveOnline ? (st.idriveAction ? S_OK : S_UNK) : S_UNK,
-    uart:   st.idriveOnline ? S_OK : S_BAD,
+    // "never spoken since boot" is not the same claim as "was working, now
+    // silent", and only the second is a fault. An iDrive still running
+    // firmware older than 1.8.0 has no heartbeat at all, so it lands in the
+    // first case — grey and labelled, rather than a red that is not earned.
+    uart:   st.idriveOnline ? S_OK : st.idriveAge < 0 ? S_UNK : S_BAD,
     ir:     S_UNK,                                   // write-only, always
     hw:     st.onewireOk && st.adsOk && !flapFault ? S_OK : S_BAD,
     panel:  st.wsConnected ? S_OK : S_BAD,           // we are drawing, so it is up
@@ -365,7 +369,9 @@ function SystemStatus({ st, onClose }) {
   if (L.hid === S_BAD) attention.push([C.red, "BRIDGE -> TSDASH",
     st.tsdashInit ? "stack up (init:1), no host on the native port" : "USB stack failed to start"]);
   if (L.uart === S_BAD) attention.push([C.red, "iDRIVE -> Pi",
-    `no heartbeat for ${ageText(st.idriveAge)}`]);
+    `heartbeat stopped ${ageText(st.idriveAge)} ago`]);
+  if (L.uart === S_UNK) attention.push([C.dim, "iDRIVE -> Pi",
+    "no heartbeat since boot - needs firmware 1.8.0"]);
   if (L.bridge === S_BAD) attention.push([C.red, "Pi -> DASH BRIDGE", "/dev/tsdash not answering"]);
   if (L.light === S_BAD) attention.push([C.red, "Pi -> LIGHTING", "/dev/lighting not answering"]);
   if (L.hw === S_BAD) attention.push([C.red, "HVAC HARDWARE",
@@ -417,7 +423,9 @@ function SystemStatus({ st, onClose }) {
 
         {/* nodes */}
         <SysNode x={46}   y={114} title="iDRIVE KNOB"   st={L.can} />
-        <SysNode x={336}  y={114} w={260} title="iDRIVE ESP32" st={L.uart} />
+        <SysNode x={336} y={114} w={260} title="iDRIVE ESP32"
+          sub={st.idriveOnline ? ageText(st.idriveAge)
+               : st.idriveAge < 0 ? "no heartbeat" : "silent"} st={L.uart} />
         <SysNode x={636}  y={114} title="HEAD UNIT"     st={L.ir} />
         <SysNode x={336}  y={246} w={260} h={104} title="HVAC Pi"
           sub={`up ${Math.floor(st.uptime / 3600)}h ${Math.floor((st.uptime % 3600) / 60)}m`}

@@ -865,15 +865,17 @@ class HVACController:
         self.state.idrive_age_s = _age_of("idrive", now)
         self.state.illum_age_s  = _age_of("illum",  now)
         self.state.tsdash_age_s = _age_of("tsdash", now)
-        self.state.idrive_online = (
-            0 <= self.state.idrive_age_s < LINK_STALE_S)
-        # The other two own an explicit flag from their reader threads, but a
-        # stale one is still a fault — an open port that has gone quiet is not
-        # a healthy link.
-        if self.state.illum_online and not (0 <= self.state.illum_age_s < LINK_STALE_S):
-            self.state.illum_online = False
-        if self.state.tsdash_online and not (0 <= self.state.tsdash_age_s < LINK_STALE_S):
-            self.state.tsdash_online = False
+        def _fresh(age):
+            return 0 <= age < LINK_STALE_S
+
+        # Derived every tick, never latched. An earlier version let the reader
+        # thread set online=True once at connect and then only ever cleared it
+        # on staleness — so the first tick, which runs before any data has
+        # arrived, pinned it false for the life of the process. Both boards are
+        # polled every 2 s, so freshness is the honest test for all three.
+        self.state.idrive_online = _fresh(self.state.idrive_age_s)
+        self.state.illum_online  = _port_up["illum"]  and _fresh(self.state.illum_age_s)
+        self.state.tsdash_online = _port_up["tsdash"] and _fresh(self.state.tsdash_age_s)
 
         # ── Bench-test override ───────────────────────────────
         # Force a fake cabin temp so heating can be exercised indoors.
@@ -1017,6 +1019,11 @@ LINK_STALE_S = 6.0
 # GIL and a torn read here would only ever be one tick stale.
 _last_rx = {"idrive": 0.0, "illum": 0.0, "tsdash": 0.0}
 
+# Whether the reader thread currently holds the port open. Separate from
+# freshness on purpose: an open port that has gone quiet is a different fault
+# from a port that will not open, and the status page says which.
+_port_up = {"illum": False, "tsdash": False}
+
 
 def _mark_rx(link: str):
     """Note that a link just proved it is alive."""
@@ -1068,14 +1075,23 @@ def lighting_reader_loop():
             port = serial.Serial(LIGHTING_PORT, LIGHTING_BAUD, timeout=1)
             with _lighting_lock:
                 _lighting_port = port
-            controller.state.illum_online = True
+            _port_up["illum"] = True
             complained = False
             log.info("lighting link up on %s", LIGHTING_PORT)
             port.write(b"L GET\n")        # ask for current state on connect
+            last_poll = time.monotonic()
 
             # readline(), never `for line in port` — iteration ends the
             # moment a read times out, which idle guarantees.
             while True:
+                # Poll on idle, exactly as the bridge does. This board only
+                # speaks when something changes, so without it a healthy but
+                # untouched link ages out and the status page shows a red that
+                # is not real — the same lie as a false green, just louder.
+                now = time.monotonic()
+                if now - last_poll >= 2.0:
+                    last_poll = now
+                    port.write(b"L GET\n")
                 raw = port.readline()
                 if not raw:
                     continue
@@ -1103,7 +1119,7 @@ def lighting_reader_loop():
         except Exception as e:
             with _lighting_lock:
                 _lighting_port = None
-            controller.state.illum_online = False
+            _port_up["illum"] = False
             if not complained:
                 log.warning("lighting link unavailable (%s): %s — retrying",
                             LIGHTING_PORT, e)
@@ -1176,7 +1192,7 @@ def tsdash_reader_loop():
             port = serial.Serial(TSDASH_PORT, TSDASH_BAUD, timeout=1)
             with _tsdash_lock:
                 _tsdash_port = port
-            controller.state.tsdash_online = True
+            _port_up["tsdash"] = True
             complained = False
             log.info("tsdash link up on %s", TSDASH_PORT)
             port.write(b"D PING\n")       # prove the far end answers
@@ -1240,7 +1256,7 @@ def tsdash_reader_loop():
         except Exception as e:
             with _tsdash_lock:
                 _tsdash_port = None
-            controller.state.tsdash_online = False
+            _port_up["tsdash"] = False
             if not complained:
                 log.warning("tsdash link unavailable (%s): %s — retrying",
                             TSDASH_PORT, e)
