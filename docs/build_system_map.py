@@ -369,14 +369,14 @@ graph LR
           <td><span class="chip t-usb">USB</span></td>
           <td class="mono">/dev/tsdash &rarr; ttyUSB0<br/>board's UART port (CH340)</td>
           <td class="mono">D NEXT / D PREV / D CFG</td>
-          <td>Bench OK</td>
+          <td>Working</td>
         </tr>
         <tr>
           <td>Dash bridge &rarr; TSDash Pi</td>
           <td><span class="chip t-usb">USB HID</span></td>
           <td class="mono">board's NATIVE port &rarr; USB-A<br/>data-only cable</td>
           <td class="mono">Ctrl+arrow keystrokes</td>
-          <td>Enumerates; keys untested</td>
+          <td>Working</td>
         </tr>
         <tr>
           <td>MS3-Pro EVO &rarr; TSDash Pi</td>
@@ -703,7 +703,8 @@ mac   which board this is; udev cannot pin it, so it says so itself</pre>
       <span class="expect">usb:1 · TSDash Pi lists a keyboard, serial 3CDC75400BD8</span></li>
     <li><b>A dash actually changes</b>
       <span>Send <code>D NEXT</code> from the Pi and watch the TSDash screen page across.
-      This is the only step that proves keystrokes transmit rather than merely enumerate.</span>
+      This is the only step that proves keystrokes transmit rather than merely enumerate.
+      <strong>Passed 2026-07-31</strong> — the whole chain, knob to TunerStudio.</span>
       <span class="expect">dash tab moves right · D PREV returns to it</span></li>
   </ol>
 
@@ -775,6 +776,15 @@ mac   which board this is; udev cannot pin it, so it says so itself</pre>
             and nothing enumerated it. An earlier build inferred this from USB events
             and read 0 in every state — a broken indicator is worse than none, because
             you debug the wrong half.</td></tr>
+        <tr><td>The bridge never appears as <code>/dev/tsdash</code>, and the HVAC Pi
+            grows a keyboard it did not have</td>
+            <td><b>The two USB-C cables are swapped at the bridge.</b> The native (HID)
+            port is on the HVAC Pi instead of the TSDash Pi. Check with
+            <code>lsusb | grep "Dash Bridge"</code> on the HVAC Pi — if it is there, it is
+            in the wrong socket. Swap them at the BOARD end, not the Pi ends. Caught on
+            first install: the bridge was a live <code>sysrq</code>-capable keyboard on the
+            climate-control Pi, and the first keystroke would have gone to the wrong
+            machine while reading as a dead HID link.</td></tr>
         <tr><td>macOS opens "Keyboard Setup Assistant" when the bridge is plugged in</td>
             <td>Expected — it is a new unknown HID keyboard, and that dialog is in fact
             the cleanest proof it enumerated. Dismiss it; the wizard asks for the key
@@ -966,7 +976,7 @@ mac   which board this is; udev cannot pin it, so it says so itself</pre>
             <td class="mono">none yet</td></tr>
         <tr><td><b>Dash bridge</b><br/><span class="mono">Lonely Binary N16R8</span></td>
             <td class="mono">3C:DC:75:40:0B:D8<br/>USB serial 3CDC75400BD8</td>
-            <td class="mono">/dev/tsdash<br/>(by hub port)</td>
+            <td class="mono">/dev/tsdash<br/>(hub port 1-1.4)</td>
             <td class="mono">core 3.3.10<br/>USBMode=default</td>
             <td class="mono">dash_bridge v1.1.0</td></tr>
         <tr><td><b>Lighting knob</b><br/><span class="mono">CrowPanel 1.28"</span></td>
