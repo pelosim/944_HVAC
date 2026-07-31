@@ -234,6 +234,8 @@ class HVACState:
     idrive_action: str = ""           # last action name, for the caption
     idrive_active: bool = False       # True briefly after any knob input
     idrive_last_s: float = 0.0        # monotonic stamp of the last event
+    idrive_online: bool = False       # UART link proven alive by the heartbeat
+    idrive_age_s: float = -1.0        # seconds since ANY line arrived; -1 = never
 
     # ── Interior lighting (ESP32 output board, over USB) ──────────
     # The lighting board owns these values; we only mirror what it
@@ -245,6 +247,7 @@ class HVACState:
     illum_color: int = 0              # palette index 0-9
     illum_relay: bool = False         # dome light
     illum_night: bool = False         # illumination sense: headlights on
+    illum_age_s: float = -1.0         # seconds since the board last reported
 
     # ── TSDash bridge (ESP32 HID keyboard board, over USB) ────────
     # Write-only. The bridge types Ctrl+Left/Right at the TSDash Pi and
@@ -254,6 +257,12 @@ class HVACState:
     tsdash_online: bool = False       # serial link to the bridge is up
     tsdash_last: str = ""             # last command sent, for the mirror
     tsdash_mac: str = ""              # MAC the bridge reports; see TSDASH_MAC
+    tsdash_init: bool = False         # bridge: tinyusb_init() succeeded at boot
+    tsdash_usb: bool = False          # bridge: a USB host has enumerated it
+    tsdash_age_s: float = -1.0        # seconds since the bridge last reported
+
+    # ── System status screen ──────────────────────────────────────
+    system_view: bool = False         # touchscreen shows the link topology page
 
     def to_json(self):
         return json.dumps(asdict(self))
@@ -698,6 +707,11 @@ class HVACController:
             page = str(cmd["aux_display"]).lower()
             if page in ("clock", "gmeter"):
                 self.state.aux_display = page
+        if "system_view" in cmd:
+            v = cmd["system_view"]
+            # "toggle" so the knob does not need to know the current state.
+            self.state.system_view = (not self.state.system_view
+                                      if str(v).lower() == "toggle" else bool(v))
         if "tsdash" in cmd:
             # Page the TunerStudio dash on the TSDash Pi. Nothing is stored:
             # this is a fire-and-forget keystroke, and there is no state here
@@ -759,6 +773,10 @@ class HVACController:
             i = order.index(self.state.vent_mode) if self.state.vent_mode in order else 0
             step = 1 if action == "HVAC_MODE_NEXT" else -1
             cmd["vent_mode"] = order[(i + step) % len(order)]
+        elif action == "SYSTEM_TOGGLE":
+            # BACK button. Global, not a mode: the status page is read-only, so
+            # the knob keeps doing whatever it was doing while you look at it.
+            cmd["system_view"] = "toggle"
         elif action == "AUX_SWAP":
             # Dedicated button: swap the round screen clock <-> G-meter.
             cmd["aux_display"] = "gmeter" if self.state.aux_display == "clock" else "clock"
@@ -837,6 +855,25 @@ class HVACController:
             self.state.idrive_last_s > 0
             and (now - self.state.idrive_last_s) < IDRIVE_ACTIVE_S
         )
+
+        # ── Link liveness ─────────────────────────────────────
+        # idrive_active means "the knob was just touched"; idrive_online means
+        # "the wire is alive". They are NOT the same thing and conflating them
+        # was the worst gap here: a knob nobody has touched for an hour looked
+        # exactly like a severed UART, so a status page would show green
+        # straight through a real fault. The firmware heartbeats for this.
+        self.state.idrive_age_s = _age_of("idrive", now)
+        self.state.illum_age_s  = _age_of("illum",  now)
+        self.state.tsdash_age_s = _age_of("tsdash", now)
+        self.state.idrive_online = (
+            0 <= self.state.idrive_age_s < LINK_STALE_S)
+        # The other two own an explicit flag from their reader threads, but a
+        # stale one is still a fault — an open port that has gone quiet is not
+        # a healthy link.
+        if self.state.illum_online and not (0 <= self.state.illum_age_s < LINK_STALE_S):
+            self.state.illum_online = False
+        if self.state.tsdash_online and not (0 <= self.state.tsdash_age_s < LINK_STALE_S):
+            self.state.tsdash_online = False
 
         # ── Bench-test override ───────────────────────────────
         # Force a fake cabin temp so heating can be exercised indoors.
@@ -969,6 +1006,28 @@ connected_clients = set()
 IDRIVE_PORT = "/dev/serial0"
 IDRIVE_BAUD = 115200
 
+# A link is "online" if it has said anything at all within this window. The
+# iDrive firmware heartbeats every 2 s, the lighting board and the bridge are
+# polled, so a silence longer than this is a real fault rather than an idle
+# user. Deliberately generous — a false red is as bad as a false green.
+LINK_STALE_S = 6.0
+
+# Monotonic stamp of the last line received from each link. Written by the
+# reader threads, read by tick(). Plain floats: assignment is atomic under the
+# GIL and a torn read here would only ever be one tick stale.
+_last_rx = {"idrive": 0.0, "illum": 0.0, "tsdash": 0.0}
+
+
+def _mark_rx(link: str):
+    """Note that a link just proved it is alive."""
+    _last_rx[link] = time.monotonic()
+
+
+def _age_of(link: str, now: float) -> float:
+    """Seconds since this link last spoke, or -1 if it never has."""
+    t = _last_rx[link]
+    return (now - t) if t > 0 else -1.0
+
 # ── Interior lighting board ────────────────────────────────────
 # ESP32 output board on USB (stable name from the udev rule). We send
 # RELATIVE commands only — the board owns the real brightness and reports
@@ -1031,6 +1090,7 @@ def lighting_reader_loop():
                     continue
                 if evt.get("src") != "illum":
                     continue
+                _mark_rx("illum")
                 st = controller.state
                 try:
                     st.illum_ch1   = int(evt.get("ch1", st.illum_ch1))
@@ -1120,11 +1180,19 @@ def tsdash_reader_loop():
             complained = False
             log.info("tsdash link up on %s", TSDASH_PORT)
             port.write(b"D PING\n")       # prove the far end answers
+            last_poll = time.monotonic()
 
             # readline(), never `for line in port` — same trap as the
             # lighting loop: iteration ends on the first read timeout,
             # which an idle knob guarantees.
             while True:
+                # Poll on idle. Without this the bridge only speaks when spoken
+                # to, so a dead board and a quiet one look identical and the age
+                # column on the status page would be meaningless.
+                now = time.monotonic()
+                if now - last_poll >= 2.0:
+                    last_poll = now
+                    port.write(b"D GET\n")
                 raw = port.readline()
                 if not raw:
                     continue
@@ -1138,6 +1206,15 @@ def tsdash_reader_loop():
                     continue
                 if evt.get("src") != "dash":
                     continue
+                _mark_rx("tsdash")
+
+                # init and usb split the failure in half and the status page is
+                # built on the distinction: init:0 is a firmware or build fault,
+                # init:1 with usb:0 is a cable, port or host fault. Logging them
+                # and throwing them away meant the screen could only ever say
+                # "something is wrong".
+                controller.state.tsdash_init = bool(int(evt.get("init", 0)))
+                controller.state.tsdash_usb  = bool(int(evt.get("usb", 0)))
 
                 # Identity check. Warn loudly but keep working: a wrong
                 # board will not understand "D NEXT" anyway, so the failure
@@ -1205,6 +1282,13 @@ def idrive_reader_loop():
                     evt = json.loads(line)
                 except json.JSONDecodeError:
                     log.debug("iDrive: bad line %r", line[:80])
+                    continue
+                # Any well-formed line proves the wire, heartbeat or not.
+                _mark_rx("idrive")
+                # Heartbeats carry no action. They must NOT reach
+                # apply_idrive_event() — that would light idrive_active every
+                # 2 s and leave the on-screen knob mirror permanently awake.
+                if evt.get("hb"):
                     continue
                 try:
                     controller.apply_idrive_event(evt)

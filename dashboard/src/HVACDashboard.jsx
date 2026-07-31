@@ -281,6 +281,193 @@ function Groove() {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════
+// SYSTEM STATUS — link topology (BACK button on the iDrive)
+// ════════════════════════════════════════════════════════════════
+// Colour is state, layout is the car: a broken link is a PLACE, so you
+// find it by looking rather than by reading nine rows.
+//
+// Three states, and the third one is the point. "unknown" is not a
+// softer red — it means this link has no feedback path and never will,
+// so we cannot claim to have checked it. IR is write-only; the MS3 feed
+// and the ESP-NOW hop both live on hardware this Pi cannot see. Drawing
+// those green would be the exact failure this screen exists to prevent:
+// a wall of green that sends you to the wrong half of the car.
+const S_OK = "ok", S_BAD = "fault", S_UNK = "unknown";
+const stColor = (st) => (st === S_OK ? C.green : st === S_BAD ? C.red : C.dim);
+
+// Seconds since a link last spoke, as something you can read at speed.
+// The backend sends -1 for "has never spoken at all", which must not
+// render as a confident "0s".
+function ageText(a) {
+  if (a === undefined || a === null || a < 0) return "--";
+  if (a < 10) return `${a.toFixed(1)}s`;
+  if (a < 600) return `${Math.round(a)}s`;
+  return `${Math.round(a / 60)}m`;
+}
+
+function SysNode({ x, y, w = 250, h = 64, title, sub, st }) {
+  const col = stColor(st);
+  return (
+    <g>
+      <rect x={x} y={y} width={w} height={h} rx={7} fill="#0C1416"
+        stroke={col} strokeWidth={st === S_BAD ? 3 : 2} />
+      <text x={x + w / 2} y={y + (sub ? 28 : 40)} textAnchor="middle"
+        fontFamily="'Orbitron',monospace" fontSize={23} fontWeight={700}
+        fill={st === S_UNK ? C.mid : C.text}>{title}</text>
+      {sub && (
+        <text x={x + w / 2} y={y + 50} textAnchor="middle"
+          fontFamily="'Rajdhani',sans-serif" fontSize={18} fill={col}>{sub}</text>
+      )}
+    </g>
+  );
+}
+
+function SysLink({ d, st, label, lx, ly }) {
+  const col = stColor(st);
+  return (
+    <g>
+      <path d={d} fill="none" stroke={col} strokeWidth={st === S_BAD ? 5 : 3}
+        markerEnd="url(#sysArrow)"
+        strokeDasharray={st === S_UNK ? "7 5" : undefined} />
+      {label && (
+        <text x={lx} y={ly} textAnchor="middle" fontFamily="'Orbitron',monospace"
+          fontSize={15} fill={C.dim}>{label}</text>
+      )}
+    </g>
+  );
+}
+
+function SystemStatus({ st, onClose }) {
+  // ── Derive each link's state from what the backend can actually see ──
+  const flapFault = st.mixFault || st.defFault || st.footFault;
+  const L = {
+    can:    st.idriveOnline ? (st.idriveAction ? S_OK : S_UNK) : S_UNK,
+    uart:   st.idriveOnline ? S_OK : S_BAD,
+    ir:     S_UNK,                                   // write-only, always
+    hw:     st.onewireOk && st.adsOk && !flapFault ? S_OK : S_BAD,
+    panel:  st.wsConnected ? S_OK : S_BAD,           // we are drawing, so it is up
+    aux:    S_UNK,                                   // no return path
+    light:  st.illumOnline ? S_OK : S_BAD,
+    espnow: S_UNK,                                   // knob talks to the board, not us
+    bridge: st.tsdashOnline ? S_OK : S_BAD,
+    hid:    !st.tsdashOnline ? S_UNK : st.tsdashUsb ? S_OK : S_BAD,
+    ms3:    S_UNK,                                   // on the other Pi
+  };
+  const vals = Object.values(L);
+  const nBad = vals.filter((v) => v === S_BAD).length;
+  const nUnk = vals.filter((v) => v === S_UNK).length;
+  const nOk  = vals.filter((v) => v === S_OK).length;
+
+  // Worst first. Unknowns are listed too — quietly, because they are
+  // permanent facts about the wiring rather than things to go and fix.
+  const attention = [];
+  if (L.hid === S_BAD) attention.push([C.red, "BRIDGE -> TSDASH",
+    st.tsdashInit ? "stack up (init:1), no host on the native port" : "USB stack failed to start"]);
+  if (L.uart === S_BAD) attention.push([C.red, "iDRIVE -> Pi",
+    `no heartbeat for ${ageText(st.idriveAge)}`]);
+  if (L.bridge === S_BAD) attention.push([C.red, "Pi -> DASH BRIDGE", "/dev/tsdash not answering"]);
+  if (L.light === S_BAD) attention.push([C.red, "Pi -> LIGHTING", "/dev/lighting not answering"]);
+  if (L.hw === S_BAD) attention.push([C.red, "HVAC HARDWARE",
+    flapFault ? "flap travel fault" : !st.onewireOk ? "1-Wire bus down" : "ADS1115 not answering"]);
+  attention.push([C.dim, "HEAD UNIT - IR", "write-only, no feedback path"]);
+  attention.push([C.dim, "MS3 -> TSDASH", "not visible from this Pi"]);
+
+  return (
+    <div onClick={onClose} style={{
+      position: "absolute", inset: 0, zIndex: 30, background: C.bg, cursor: "pointer",
+    }}>
+      <svg viewBox="0 0 1920 720" width="100%" height="100%"
+        role="img" aria-label="System status: link topology">
+        <defs>
+          <marker id="sysArrow" markerWidth="8" markerHeight="8" refX="7" refY="3"
+            orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L0,6 L7,3 z" fill="context-stroke" />
+          </marker>
+        </defs>
+
+        {/* header */}
+        <line x1="0" y1="92" x2="1920" y2="92" stroke={C.dim} strokeWidth="2" />
+        <text x="44" y="52" fontFamily="'Orbitron',monospace" fontSize="34"
+          fontWeight="800" fill={C.vfd} letterSpacing="3">SYSTEM STATUS</text>
+        <text x="44" y="77" fontFamily="'Rajdhani',sans-serif" fontSize="19"
+          fill={C.mid} letterSpacing="3">LINK TOPOLOGY - LIVE</text>
+        <text x="1876" y="48" textAnchor="end" fontFamily="'Orbitron',monospace"
+          fontSize="30" fontWeight="800" fill={nBad ? C.red : C.green}>
+          {nBad ? `${nBad} FAULT${nBad > 1 ? "S" : ""}` : "ALL LINKS OK"}
+        </text>
+        <text x="1876" y="77" textAnchor="end" fontFamily="'Rajdhani',sans-serif"
+          fontSize="19" fill={C.mid} letterSpacing="2">
+          {nOk} OK - {nUnk} NO FEEDBACK PATH
+        </text>
+
+        {/* links */}
+        <SysLink d="M296,146 L336,146"   st={L.can}    label="CAN"  lx={316} ly={136} />
+        <SysLink d="M596,146 L636,146"   st={L.ir}     label="IR"   lx={616} ly={136} />
+        <SysLink d="M466,182 L466,246"   st={L.uart}   label="UART" lx={506} ly={220} />
+        <SysLink d="M596,286 L636,250"   st={L.hw} />
+        <SysLink d="M596,306 L636,330"   st={L.panel} />
+        <SysLink d="M596,326 L636,410"   st={L.aux} />
+        <SysLink d="M466,350 L466,552"   st={L.light}  label="USB"  lx={504} ly={470} />
+        <SysLink d="M596,330 L636,494"   st={L.bridge} />
+        <SysLink d="M896,522 L936,522"   st={L.hid}    label="HID"  lx={916} ly={506} />
+        <SysLink d="M1496,522 L1456,522" st={L.ms3}    label="FTDI" lx={1476} ly={506} />
+        <SysLink d="M296,588 L336,588"   st={L.espnow} label="NOW"  lx={316} ly={578} />
+        <SysLink d="M596,588 L636,588"   st={L.light} />
+
+        {/* nodes */}
+        <SysNode x={46}   y={114} title="iDRIVE KNOB"   st={L.can} />
+        <SysNode x={336}  y={114} w={260} title="iDRIVE ESP32" st={L.uart} />
+        <SysNode x={636}  y={114} title="HEAD UNIT"     st={L.ir} />
+        <SysNode x={336}  y={246} w={260} h={104} title="HVAC Pi"
+          sub={`up ${Math.floor(st.uptime / 3600)}h ${Math.floor((st.uptime % 3600) / 60)}m`}
+          st={S_OK} />
+        <SysNode x={636}  y={218} title="HVAC HARDWARE" st={L.hw} />
+        <SysNode x={636}  y={298} title="TOUCHSCREEN"   st={L.panel} />
+        <SysNode x={636}  y={378} title="AUX SCREEN"    st={L.aux} />
+        <SysNode x={636}  y={490} w={260} title="DASH BRIDGE"
+          sub={st.tsdashOnline ? ageText(st.tsdashAge) : "offline"} st={L.bridge} />
+        <SysNode x={936}  y={490} w={260} title="TSDASH Pi"
+          sub={L.hid === S_OK ? "host up" : L.hid === S_BAD ? "no host - usb:0" : "unknown"}
+          st={L.hid} />
+        <SysNode x={1456} y={490} title="MS3-PRO EVO"   st={L.ms3} />
+        <SysNode x={46}   y={556} title="LIGHT KNOB"    st={L.espnow} />
+        <SysNode x={336}  y={556} w={260} title="LIGHT ESP32"
+          sub={st.illumOnline ? ageText(st.illumAge) : "offline"} st={L.light} />
+        <SysNode x={636}  y={556} title="LED LOADS"     st={L.light} />
+
+        {/* needs-attention rail */}
+        <line x1="1236" y1="120" x2="1236" y2="452" stroke={C.dim} strokeWidth="2" />
+        <text x="1276" y="146" fontFamily="'Rajdhani',sans-serif" fontSize="19"
+          fill={C.mid} letterSpacing="3">NEEDS ATTENTION</text>
+        {attention.slice(0, 4).map(([col, head, body], i) => (
+          <g key={head}>
+            <rect x="1276" y={168 + i * 74} width="6" height="52" fill={col} />
+            <text x="1300" y={192 + i * 74} fontFamily="'Orbitron',monospace"
+              fontSize="21" fontWeight="700" fill={col === C.dim ? C.mid : col}>{head}</text>
+            <text x="1300" y={214 + i * 74} fontFamily="'Rajdhani',sans-serif"
+              fontSize="18" fill={C.dim}>{body}</text>
+          </g>
+        ))}
+
+        {/* legend */}
+        <line x1="0" y1="656" x2="1920" y2="656" stroke={C.dim} strokeWidth="2" />
+        <g fontFamily="'Rajdhani',sans-serif" fontSize="19" fill={C.mid}>
+          <rect x="44" y="681" width="26" height="6" fill={C.green} />
+          <text x="82" y="694">HEALTHY</text>
+          <rect x="230" y="681" width="26" height="6" fill={C.red} />
+          <text x="268" y="694">FAULT</text>
+          <rect x="392" y="681" width="26" height="6" fill={C.dim} />
+          <text x="430" y="694">NO FEEDBACK PATH</text>
+          <text x="1876" y="694" textAnchor="end" fill={C.dim}>
+            BACK BUTTON OR TAP TO EXIT
+          </text>
+        </g>
+      </svg>
+    </div>
+  );
+}
+
 export default function HVACDashboard() {
   // ─── WebSocket ────────────────────────────────────────────
   const wsRef = useRef(null);
@@ -319,6 +506,18 @@ export default function HVACDashboard() {
   const [time, setTime] = useState(new Date());
   const [stageScale, setStageScale] = useState(1);
   const [idriveMode, setIdriveMode] = useState("radio");
+
+  // ─── System status page ───────────────────────────────────
+  const [systemView, setSystemView] = useState(false);
+  const [idriveOnline, setIdriveOnline] = useState(false);
+  const [idriveAge, setIdriveAge] = useState(-1);
+  const [illumOnline, setIllumOnline] = useState(false);
+  const [illumAge, setIllumAge] = useState(-1);
+  const [tsdashOnline, setTsdashOnline] = useState(false);
+  const [tsdashAge, setTsdashAge] = useState(-1);
+  const [tsdashInit, setTsdashInit] = useState(false);
+  const [tsdashUsb, setTsdashUsb] = useState(false);
+  const [uptime, setUptime] = useState(0);
   const [idriveDetents, setIdriveDetents] = useState(0);
   const [idriveAction, setIdriveAction] = useState("");
   const [idriveActive, setIdriveActive] = useState(false);
@@ -389,6 +588,16 @@ export default function HVACDashboard() {
           apply("onewire_ok", setOnewireOk);
           apply("ads_ok", setAdsOk);
           apply("control_active", setControlActive);
+          apply("system_view", setSystemView);
+          apply("idrive_online", setIdriveOnline);
+          apply("idrive_age_s", setIdriveAge);
+          apply("illum_online", setIllumOnline);
+          apply("illum_age_s", setIllumAge);
+          apply("tsdash_online", setTsdashOnline);
+          apply("tsdash_age_s", setTsdashAge);
+          apply("tsdash_init", setTsdashInit);
+          apply("tsdash_usb", setTsdashUsb);
+          apply("uptime_s", setUptime);
         } catch (e) { /* ignore */ }
       };
       ws.onclose = () => {
@@ -426,6 +635,9 @@ export default function HVACDashboard() {
     setSetpoint(val); sendCmd({ setpoint_f: val });
   };
   const cmdFanSpeed = (v) => { setFanSpeed(v); sendCmd({ fan_speed: v }); };
+  // Tap-to-dismiss mirrors the BACK button. Sent as an explicit false rather
+  // than "toggle" so a tap can never race the knob into re-opening the page.
+  const cmdCloseSystem = () => { setSystemView(false); sendCmd({ system_view: false }); };
   const cmdAcOn = (v) => { setAcOn(v); sendCmd({ ac_on: v }); };
   const cmdHeatValve = (v) => { setHeatValve(v); sendCmd({ heat_valve: v }); };
   const cmdOutsideAir = (v) => { setOutsideAir(v); sendCmd({ outside_air: v }); };
@@ -549,6 +761,23 @@ export default function HVACDashboard() {
         color: C.text, fontFamily: "'Rajdhani',sans-serif",
         position: "relative", overflow: "hidden",
       }}>
+        {/* ════ SYSTEM STATUS ════
+            Sits above the bands but BELOW the glass overlay, so it picks up
+            the same scanlines as everything else and reads as part of the
+            panel rather than a web page pasted over it. */}
+        {systemView && (
+          <SystemStatus
+            onClose={cmdCloseSystem}
+            st={{
+              idriveOnline, idriveAge, idriveAction,
+              illumOnline, illumAge,
+              tsdashOnline, tsdashAge, tsdashInit, tsdashUsb,
+              onewireOk, adsOk, wsConnected, uptime,
+              mixFault: mixFlapFault, defFault: defrostFlapFault, footFault: footFlapFault,
+            }}
+          />
+        )}
+
         {/* glass + scanline atmosphere over everything */}
         <div style={{
           position: "absolute", inset: 0, pointerEvents: "none", zIndex: 20,

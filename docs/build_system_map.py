@@ -256,7 +256,7 @@ graph LR
         <dt>MAC</dt><dd>D0:CF:13:24:DB:B8</dd>
         <dt>Core</dt><dd>esp32 3.3.10 (~/.arduino-cli-esp32v3)</dd>
         <dt>Flash</dt><dd>tools/flash-via-pi.sh</dd>
-        <dt>Version</dt><dd>v1.7.0</dd>
+        <dt>Version</dt><dd>v1.8.0</dd>
         <dt>Repo</dt><dd>pelosim/idrive-controller</dd>
       </dl>
     </div>
@@ -556,6 +556,11 @@ graph LR
   <h3>iDrive &rarr; Pi · newline-delimited JSON</h3>
   <pre class="proto"><b>{"mode":"HVAC","action":"TEMP_UP","count":2}</b>
 mode    RADIO | HVAC | ILLUM | GAUGE | TSDASH
+
+<b>{"hb":1,"mode":"RADIO","up":4127}</b>   heartbeat, every 2 s
+        Liveness only, deliberately a different shape. The Pi keys on "hb"
+        and drops it before the action path, so it can never be mistaken
+        for input. Without it an idle knob and a cut UART look identical.
 action  TEMP_UP TEMP_DOWN FAN_UP FAN_DOWN HVAC_TOGGLE
         HVAC_MODE_NEXT HVAC_MODE_PREV AUX_SWAP
         LIGHT_BRIGHTER LIGHT_DIMMER LIGHT_TOGGLE
@@ -563,6 +568,7 @@ action  TEMP_UP TEMP_DOWN FAN_UP FAN_DOWN HVAC_TOGGLE
         GAUGE_SCROLL_UP GAUGE_SCROLL_DOWN GAUGE_SELECT
         GAUGE_PAGE_NEXT GAUGE_PAGE_PREV   (emitted, nothing consumes them)
         TSDASH_NEXT TSDASH_PREV TSDASH_CFG TSDASH_HOME
+        SYSTEM_TOGGLE                      (BACK — status page on/off)
         VOL_UP VOL_DOWN MUTE NEXT PREV   (mirror only — IR does the work)
 count   detents in this frame, clamped 1..12</pre>
 
@@ -581,8 +587,8 @@ count   detents in this frame, clamped 1..12</pre>
             <td>backup cluster (T-Display panels) — no protocol yet</td></tr>
         <tr><td class="pin">OPTION</td><td class="mono">TSDASH</td><td class="mono">spring green</td>
             <td>TunerStudio dash, via the bridge</td></tr>
-        <tr><td class="pin">BACK</td><td class="mono">RADIO</td><td class="mono">teal</td>
-            <td>always returns home</td></tr>
+        <tr><td class="pin">BACK</td><td class="mono">—</td><td class="mono">white</td>
+            <td>global SYSTEM_TOGGLE: the link status page on the touchscreen</td></tr>
         <tr><td class="pin">COM</td><td class="mono">—</td><td class="mono">ice blue</td>
             <td>global AUX_SWAP: round screen clock &harr; G-meter</td></tr>
       </tbody>
@@ -596,6 +602,11 @@ count   detents in this frame, clamped 1..12</pre>
     <p><code>AUX_SWAP</code> moved from OPTION to <strong>COM</strong> when TSDASH took
     that button. Any non-RADIO mode reverts on its own after 10 s idle, so volume is
     what the knob does unless you just said otherwise.</p>
+    <p><strong>BACK is no longer a second way home.</strong> MEDIA carries the printed
+    label for the default mode and reaches it just as fast, so BACK was redundant and
+    now opens the status page instead — global rather than a mode, because that page is
+    read-only and the knob should keep doing whatever it was doing while you read it.
+    Press again, or tap the screen, to dismiss.</p>
   </div>
 
   <h3>Pi &harr; lighting board · text out, JSON back</h3>
@@ -937,7 +948,7 @@ mac   which board this is; udev cannot pin it, so it says so itself</pre>
             <td class="mono">D0:CF:13:24:DB:B8</td>
             <td class="mono">/dev/idrive</td>
             <td class="mono">core 3.3.10</td>
-            <td class="mono">idrive_controller v1.7.0</td></tr>
+            <td class="mono">idrive_controller v1.8.0</td></tr>
         <tr><td><b>Lighting output</b><br/><span class="mono">Lonely Binary N16R8</span></td>
             <td class="mono">3C:DC:75:40:0B:F0</td>
             <td class="mono">/dev/lighting</td>
@@ -1039,7 +1050,7 @@ mac   which board this is; udev cannot pin it, so it says so itself</pre>
 
 <footer>
   944S restomod electronics · pin data read from hvac_backend.py,
-  idrive_controller.ino v1.7.0, pwm_controller.ino, dash_bridge.ino v1.1.0 ·
+  idrive_controller.ino v1.8.0, pwm_controller.ino, dash_bridge.ino v1.1.0 ·
   source at <code>docs/system-map.html</code> in pelosim/944_HVAC
 </footer>
 
