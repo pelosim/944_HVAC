@@ -19,7 +19,10 @@ SVG = r'''<svg viewBox="0 0 940 560" width="100%" role="img"
 <desc id="dgd">The iDrive knob feeds an ESP32 over CAN. That ESP32 drives the head
 unit over IR and reports to the HVAC Pi over UART. The Pi drives the HVAC hardware,
 the touchscreen and the round auxiliary screen, and a planned USB link reaches the
-lighting output board, which is also driven by its own knob over ESP-NOW.</desc>
+lighting output board, which is also driven by its own knob over ESP-NOW. The Pi also
+reaches a dash bridge ESP32 over USB serial; that bridge presents itself to a separate
+TSDash Pi as a USB keyboard, and the TSDash Pi reads the MS3-Pro EVO over its own FTDI
+serial link.</desc>
 <defs>
   <marker id="a" markerWidth="9" markerHeight="9" refX="8" refY="3"
     orient="auto" markerUnits="strokeWidth">
@@ -40,6 +43,9 @@ lighting output board, which is also driven by its own knob over ESP-NOW.</desc>
     <rect x="18"  y="420" width="158" height="52" rx="7"/>
     <rect x="258" y="420" width="180" height="52" rx="7"/>
     <rect x="530" y="420" width="170" height="52" rx="7"/>
+    <rect x="530" y="320" width="170" height="52" rx="7"/>
+    <rect x="740" y="320" width="170" height="52" rx="7"/>
+    <rect x="740" y="420" width="170" height="52" rx="7"/>
   </g>
 
   <!-- labels -->
@@ -54,6 +60,9 @@ lighting output board, which is also driven by its own knob over ESP-NOW.</desc>
     <text x="97"  y="442">Lighting knob</text><text x="97" y="458" fill="#465754">CrowPanel</text>
     <text x="348" y="442">Lighting ESP32-S3</text><text x="348" y="458" fill="#465754">strip · dimmer · dome</text>
     <text x="615" y="442">Interior lighting</text><text x="615" y="458" fill="#465754">loads</text>
+    <text x="615" y="342">Dash bridge S3</text><text x="615" y="358" fill="#465754">USB HID keyboard</text>
+    <text x="825" y="342">TSDash Pi</text><text x="825" y="358" fill="#465754">TunerStudio dash</text>
+    <text x="825" y="442">MS3-Pro EVO</text><text x="825" y="458" fill="#465754">ECU</text>
   </g>
 
   <!-- links -->
@@ -67,6 +76,9 @@ lighting output board, which is also driven by its own knob over ESP-NOW.</desc>
     <path d="M348,248 L348,414" stroke="#175F9E" stroke-dasharray="6 4"/>
     <path d="M176,446 L252,446" stroke="#A81F17"/>
     <path d="M438,446 L524,446" stroke="#5A6B68"/>
+    <path d="M438,240 L524,340" stroke="#175F9E"/>
+    <path d="M700,346 L734,346" stroke="#175F9E"/>
+    <path d="M825,416 L825,378" stroke="#5A6B68"/>
   </g>
 
   <!-- link captions -->
@@ -76,6 +88,9 @@ lighting output board, which is also driven by its own knob over ESP-NOW.</desc>
     <text x="356" y="146">UART 115200 · NDJSON</text>
     <text x="356" y="338">USB serial · planned</text>
     <text x="214" y="438" text-anchor="middle">ESP-NOW</text>
+    <text x="502" y="300">USB</text>
+    <text x="717" y="338" text-anchor="middle">HID</text>
+    <text x="833" y="400">FTDI</text>
   </g>
 </g>
 </svg>'''

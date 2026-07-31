@@ -198,9 +198,9 @@ footer{margin-top:56px;padding-top:20px;border-top:1px solid var(--line);
   <code>hvac_backend.py</code>, <code>idrive_controller.ino</code>, and
   <code>pwm_controller.ino</code>.</p>
   <div class="stamp">
-    <span>6 modules</span>
-    <span>4 ESP32s on the Pi USB hub</span>
-    <span>generated 2026-07-30</span>
+    <span>7 modules</span>
+    <span>5 ESP32s on the Pi USB hub</span>
+    <span>generated 2026-07-31</span>
   </div>
 </header>
 
@@ -222,7 +222,10 @@ footer{margin-top:56px;padding-top:20px;border-top:1px solid var(--line);
 <desc id="dgd">The iDrive knob feeds an ESP32 over CAN. That ESP32 drives the head
 unit over IR and reports to the HVAC Pi over UART. The Pi drives the HVAC hardware,
 the touchscreen and the round auxiliary screen, and a planned USB link reaches the
-lighting output board, which is also driven by its own knob over ESP-NOW.</desc>
+lighting output board, which is also driven by its own knob over ESP-NOW. The Pi also
+reaches a dash bridge ESP32 over USB serial; that bridge presents itself to a separate
+TSDash Pi as a USB keyboard, and the TSDash Pi reads the MS3-Pro EVO over its own FTDI
+serial link.</desc>
 <defs>
   <marker id="a" markerWidth="9" markerHeight="9" refX="8" refY="3"
     orient="auto" markerUnits="strokeWidth">
@@ -243,6 +246,9 @@ lighting output board, which is also driven by its own knob over ESP-NOW.</desc>
     <rect x="18"  y="420" width="158" height="52" rx="7"/>
     <rect x="258" y="420" width="180" height="52" rx="7"/>
     <rect x="530" y="420" width="170" height="52" rx="7"/>
+    <rect x="530" y="320" width="170" height="52" rx="7"/>
+    <rect x="740" y="320" width="170" height="52" rx="7"/>
+    <rect x="740" y="420" width="170" height="52" rx="7"/>
   </g>
 
   <!-- labels -->
@@ -257,6 +263,9 @@ lighting output board, which is also driven by its own knob over ESP-NOW.</desc>
     <text x="97"  y="442">Lighting knob</text><text x="97" y="458" fill="#465754">CrowPanel</text>
     <text x="348" y="442">Lighting ESP32-S3</text><text x="348" y="458" fill="#465754">strip · dimmer · dome</text>
     <text x="615" y="442">Interior lighting</text><text x="615" y="458" fill="#465754">loads</text>
+    <text x="615" y="342">Dash bridge S3</text><text x="615" y="358" fill="#465754">USB HID keyboard</text>
+    <text x="825" y="342">TSDash Pi</text><text x="825" y="358" fill="#465754">TunerStudio dash</text>
+    <text x="825" y="442">MS3-Pro EVO</text><text x="825" y="458" fill="#465754">ECU</text>
   </g>
 
   <!-- links -->
@@ -270,6 +279,9 @@ lighting output board, which is also driven by its own knob over ESP-NOW.</desc>
     <path d="M348,248 L348,414" stroke="#175F9E" stroke-dasharray="6 4"/>
     <path d="M176,446 L252,446" stroke="#A81F17"/>
     <path d="M438,446 L524,446" stroke="#5A6B68"/>
+    <path d="M438,240 L524,340" stroke="#175F9E"/>
+    <path d="M700,346 L734,346" stroke="#175F9E"/>
+    <path d="M825,416 L825,378" stroke="#5A6B68"/>
   </g>
 
   <!-- link captions -->
@@ -279,6 +291,9 @@ lighting output board, which is also driven by its own knob over ESP-NOW.</desc>
     <text x="356" y="146">UART 115200 · NDJSON</text>
     <text x="356" y="338">USB serial · planned</text>
     <text x="214" y="438" text-anchor="middle">ESP-NOW</text>
+    <text x="502" y="300">USB</text>
+    <text x="717" y="338" text-anchor="middle">HID</text>
+    <text x="833" y="400">FTDI</text>
   </g>
 </g>
 </svg>
@@ -288,6 +303,11 @@ lighting output board, which is also driven by its own knob over ESP-NOW.</desc>
     panels and the ACC/IGN ignition display are separate projects with no link to
     this system yet. The iDrive's <code>GAUGE</code> mode is reserved for the gauge
     panels but currently emits actions nothing consumes.</p>
+    <p><strong>The TSDash Pi is a second Pi, not a screen on this one.</strong> It runs
+    TSDash Echo against the MS3-Pro EVO on its own FTDI serial link, has only VNC open
+    (no SSH), and is not networked to the HVAC Pi in the car. That isolation is why the
+    dash bridge exists: it reaches that Pi as a USB keyboard, which needs nothing
+    installed on the far end.</p>
   </div>
 </section>
 
@@ -316,7 +336,7 @@ lighting output board, which is also driven by its own knob over ESP-NOW.</desc>
         <dt>MAC</dt><dd>D0:CF:13:24:DB:B8</dd>
         <dt>Core</dt><dd>esp32 3.3.10 (~/.arduino-cli-esp32v3)</dd>
         <dt>Flash</dt><dd>tools/flash-via-pi.sh</dd>
-        <dt>Version</dt><dd>v1.6.0</dd>
+        <dt>Version</dt><dd>v1.7.0</dd>
         <dt>Repo</dt><dd>pelosim/idrive-controller</dd>
       </dl>
     </div>
@@ -330,6 +350,32 @@ lighting output board, which is also driven by its own knob over ESP-NOW.</desc>
         <dt>Core</dt><dd>esp32 2.0.14 (~/.arduino-cli-esp32v2)</dd>
         <dt>Partition</dt><dd>Huge APP (3 MB, no OTA)</dd>
         <dt>Repo</dt><dd>pelosim/Automotive-Lighting-Controller</dd>
+      </dl>
+    </div>
+
+    <div class="mod">
+      <p class="mod-name">Dash Bridge</p>
+      <p class="mod-role">USB HID keyboard &rarr; TSDash Pi</p>
+      <dl class="kv">
+        <dt>Board</dt><dd>Lonely Binary ESP32-S3 N16R8</dd>
+        <dt>MAC</dt><dd>3C:DC:75:40:0B:D8</dd>
+        <dt>USB serial</dt><dd>3CDC75400BD8 · 303a:1001</dd>
+        <dt>Core</dt><dd>esp32 3.3.10 · USBMode=default</dd>
+        <dt>Version</dt><dd>dash_bridge v1.1.0</dd>
+        <dt>Repo</dt><dd>pelosim/idrive-controller</dd>
+      </dl>
+    </div>
+
+    <div class="mod pi">
+      <p class="mod-name">TSDash Pi</p>
+      <p class="mod-role">TunerStudio dash · MS3-Pro EVO</p>
+      <dl class="kv">
+        <dt>Host</dt><dd>tsdash.local · 192.168.1.93</dd>
+        <dt>MAC</dt><dd>2C:CF:67:7E:D7:D7</dd>
+        <dt>App</dt><dd>TSDash Echo · 3-seat licence</dd>
+        <dt>ECU</dt><dd>MS3-Pro EVO · FTDI AQ03DW41<br/>ttyUSB0 115200 8N1</dd>
+        <dt>Access</dt><dd>VNC 5900 only &mdash; no SSH</dd>
+        <dt>Repo</dt><dd>pelosim/944S-PiDash-Backup</dd>
       </dl>
     </div>
 
@@ -396,6 +442,27 @@ lighting output board, which is also driven by its own knob over ESP-NOW.</desc>
           <td><span class="chip t-radio">ESP-NOW</span></td>
           <td class="mono">no wires, shared GND</td>
           <td class="mono">4-byte packets</td>
+          <td>Working</td>
+        </tr>
+        <tr>
+          <td>Pi &rarr; dash bridge</td>
+          <td><span class="chip t-usb">USB</span></td>
+          <td class="mono">/dev/tsdash &rarr; ttyUSB0<br/>board's UART port (CH340)</td>
+          <td class="mono">D NEXT / D PREV / D CFG</td>
+          <td>Bench OK</td>
+        </tr>
+        <tr>
+          <td>Dash bridge &rarr; TSDash Pi</td>
+          <td><span class="chip t-usb">USB HID</span></td>
+          <td class="mono">board's NATIVE port &rarr; USB-A<br/>data-only cable</td>
+          <td class="mono">Ctrl+arrow keystrokes</td>
+          <td>Enumerates; keys untested</td>
+        </tr>
+        <tr>
+          <td>MS3-Pro EVO &rarr; TSDash Pi</td>
+          <td><span class="chip t-usb">USB</span></td>
+          <td class="mono">built-in FTDI AQ03DW41<br/>ttyUSB0 on that Pi</td>
+          <td class="mono">TunerStudio telemetry</td>
           <td>Working</td>
         </tr>
       </tbody>
@@ -506,8 +573,24 @@ lighting output board, which is also driven by its own knob over ESP-NOW.</desc>
             <td class="mono">—</td><td>console + flashing; no Pi protocol yet</td></tr>
         <tr><td class="mono">/dev/gauges2</td><td class="mono">ttyACM3</td><td>Gauge panel B (slave)</td>
             <td class="mono">—</td><td>named only — no firmware assembled</td></tr>
+        <tr><td class="mono">/dev/tsdash</td><td class="mono">tty<b>USB</b>0</td><td>Dash bridge</td>
+            <td class="mono">115200</td><td>CH340, not the ESP — pinned by hub PORT</td></tr>
       </tbody>
     </table>
+    <div class="note stop">
+      <p><strong>The bridge is the one board udev cannot pin by MAC.</strong> Every other
+      board here is reached over its <em>native</em> port, where the ESP32-S3 builds the
+      USB descriptor itself and publishes its MAC as the serial string. The bridge is
+      reached over its <em>UART</em> port, where the host enumerates a CH340 — a separate
+      chip with a fixed factory descriptor that knows nothing about the ESP32, and on this
+      unit carries no serial number at all.</p>
+      <p>So <code>/dev/tsdash</code> is pinned to a physical hub port and follows the
+      <em>socket</em>, not the board. Label that socket. The firmware reports its MAC in
+      every status line and the backend checks it against <code>TSDASH_MAC</code>, which
+      turns a moved cable into a log line instead of keystrokes going somewhere
+      unintended — worth having, since the bridge is <code>…0B:D8</code> and the lighting
+      board is <code>…0B:F0</code>.</p>
+    </div>
   </div>
   <div class="note stop">
     <p><strong>Two boot-config settings are load-bearing.</strong>
@@ -552,13 +635,48 @@ lighting output board, which is also driven by its own knob over ESP-NOW.</desc>
 
   <h3>iDrive &rarr; Pi · newline-delimited JSON</h3>
   <pre class="proto"><b>{"mode":"HVAC","action":"TEMP_UP","count":2}</b>
-mode    RADIO | HVAC | ILLUM | GAUGE
+mode    RADIO | HVAC | ILLUM | GAUGE | TSDASH
 action  TEMP_UP TEMP_DOWN FAN_UP FAN_DOWN HVAC_TOGGLE
         HVAC_MODE_NEXT HVAC_MODE_PREV AUX_SWAP
         LIGHT_BRIGHTER LIGHT_DIMMER LIGHT_TOGGLE
         LIGHT_SCENE_NEXT LIGHT_SCENE_PREV  MODE_ENTER
+        GAUGE_SCROLL_UP GAUGE_SCROLL_DOWN GAUGE_SELECT
+        GAUGE_PAGE_NEXT GAUGE_PAGE_PREV   (emitted, nothing consumes them)
+        TSDASH_NEXT TSDASH_PREV TSDASH_CFG TSDASH_HOME
         VOL_UP VOL_DOWN MUTE NEXT PREV   (mirror only — IR does the work)
 count   detents in this frame, clamped 1..12</pre>
+
+  <h3>Which button selects which mode</h3>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Button</th><th>Mode</th><th>LED</th><th>Drives</th></tr></thead>
+      <tbody>
+        <tr><td class="pin">MEDIA</td><td class="mono">RADIO</td><td class="mono">teal</td>
+            <td>head unit over IR</td></tr>
+        <tr><td class="pin">MENU</td><td class="mono">HVAC</td><td class="mono">amber</td>
+            <td>this Pi — top centre, easiest to find by feel</td></tr>
+        <tr><td class="pin">MAP</td><td class="mono">ILLUM</td><td class="mono">violet</td>
+            <td>lighting board</td></tr>
+        <tr><td class="pin">NAV</td><td class="mono">GAUGE</td><td class="mono">ice blue</td>
+            <td>backup cluster (T-Display panels) — no protocol yet</td></tr>
+        <tr><td class="pin">OPTION</td><td class="mono">TSDASH</td><td class="mono">spring green</td>
+            <td>TunerStudio dash, via the bridge</td></tr>
+        <tr><td class="pin">BACK</td><td class="mono">RADIO</td><td class="mono">teal</td>
+            <td>always returns home</td></tr>
+        <tr><td class="pin">COM</td><td class="mono">—</td><td class="mono">ice blue</td>
+            <td>global AUX_SWAP: round screen clock &harr; G-meter</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note">
+    <p><strong>GAUGE and TSDASH are two different screens.</strong> GAUGE is the backup
+    cluster built from the T-Display panels; TSDASH is the TunerStudio Pi. They share no
+    transport and no actions, and the mode colours are deliberately far apart —
+    telling them apart at a glance while driving is the whole job of that LED.</p>
+    <p><code>AUX_SWAP</code> moved from OPTION to <strong>COM</strong> when TSDASH took
+    that button. Any non-RADIO mode reverts on its own after 10 s idle, so volume is
+    what the knob does unless you just said otherwise.</p>
+  </div>
 
   <h3>Pi &harr; lighting board · text out, JSON back</h3>
   <pre class="proto"><b>L SET</b> &lt;ch&gt; &lt;val&gt;     absolute
@@ -569,6 +687,29 @@ ch  1 = strip brightness   2 = MOSFET dimmer
     3 = dome relay         5 = palette index 0–9
 
 <b>{"src":"illum","ch1":200,"ch2":128,"color":3,"relay":1,"night":0}</b></pre>
+
+  <h3>Pi &rarr; dash bridge · text out, JSON back</h3>
+  <pre class="proto"><b>D NEXT</b>   Ctrl+Right   dash to the right
+<b>D PREV</b>   Ctrl+Left    dash to the left
+<b>D CFG</b>    Ctrl+Up      configuration screen
+<b>D HOME</b>   Ctrl+Down    back to main dash
+<b>D PING</b> / <b>D GET</b>          no keystroke — status only
+
+<b>{"src":"dash","ok":1,"cmd":"NEXT","q":0,"sent":13,"drop":0,
+ "init":1,"usb":1,"mac":"3C:DC:75:40:0B:D8"}</b>
+
+init  did tinyusb_init() succeed at boot   — a firmware/build answer
+usb   has a host actually enumerated us    — a cable/port/host answer
+mac   which board this is; udev cannot pin it, so it says so itself</pre>
+  <div class="note">
+    <p><strong>One keystroke per command, never a burst.</strong> The knob clamps rotation
+    to 1..12 detents per frame, but the backend ignores <code>count</code> here. TS Dash
+    has a short list of tabs and the bridge types blind — it cannot read back which dash
+    is showing, so an overshoot is not recoverable. Deliberately slower than the knob
+    can turn.</p>
+    <p>The keyboard shortcuts are TS Dash's own, from its Getting Started documentation,
+    and were confirmed by hand on the TSDash Pi before any of this was built.</p>
+  </div>
 
   <h3>Lighting knob &harr; output board · ESP-NOW, 4 bytes</h3>
   <pre class="proto">[ header ][ channel ][ value ][ channel XOR value ]
@@ -621,6 +762,18 @@ ch  1 = strip brightness   2 = MOSFET dimmer
       <span>Flash it with the core 2.0.14 toolchain, plug into the Pi, capture its USB serial,
       then enable the udev line.</span>
       <span class="expect">/dev/lighting appears · backend logs "lighting link up"</span></li>
+    <li><b>Dash bridge — UART side first</b>
+      <span>Flash over the board's UART port with <code>USBMode=default</code>. Nothing
+      needs to be attached to the native port yet.</span>
+      <span class="expect">D PING answers · init:1 · mac 3C:DC:75:40:0B:D8</span></li>
+    <li><b>Dash bridge — HID side</b>
+      <span>Native port into the TSDash Pi on a <em>data-capable</em> cable. Confirm it
+      enumerates before trying to type.</span>
+      <span class="expect">usb:1 · TSDash Pi lists a keyboard, serial 3CDC75400BD8</span></li>
+    <li><b>A dash actually changes</b>
+      <span>Send <code>D NEXT</code> from the Pi and watch the TSDash screen page across.
+      This is the only step that proves keystrokes transmit rather than merely enumerate.</span>
+      <span class="expect">dash tab moves right · D PREV returns to it</span></li>
   </ol>
 
   <div class="note stop">
@@ -677,6 +830,25 @@ ch  1 = strip brightness   2 = MOSFET dimmer
             instant udev creates the symlink, then fights esptool for the device and
             leaves a half-written app partition. <code>flash-via-pi.sh</code> now stops
             and restarts the backend around the write.</td></tr>
+        <tr><td>An ESP32 powers up, its LED runs, it answers on UART — but the host
+            never sees it. No new USB device at all.</td>
+            <td><b>Charge-only USB-C cable.</b> VBUS and ground, no D+/D−. Cost an
+            evening on 2026-07-31. The board looks perfectly healthy because it
+            <em>is</em> — it just has no data path. Anything that shipped with a power
+            bank or charger is a suspect; mark the bad one the moment you find it.</td></tr>
+        <tr><td>Same symptom, and you cannot tell whether the firmware or the cable
+            is at fault</td>
+            <td>Ask the board. <code>D GET</code> reports <code>init</code> and
+            <code>usb</code> separately: <code>init:0</code> is a firmware or build
+            problem, <code>init:1</code> with <code>usb:0</code> means the stack is fine
+            and nothing enumerated it. An earlier build inferred this from USB events
+            and read 0 in every state — a broken indicator is worse than none, because
+            you debug the wrong half.</td></tr>
+        <tr><td>macOS opens "Keyboard Setup Assistant" when the bridge is plugged in</td>
+            <td>Expected — it is a new unknown HID keyboard, and that dialog is in fact
+            the cleanest proof it enumerated. Dismiss it; the wizard asks for the key
+            beside left Shift and this device only ever sends Ctrl+arrows, so it can
+            never be satisfied. Leaving it open can swallow keystrokes.</td></tr>
         <tr><td>Dashboard "still looks old" after a rebuild</td>
             <td>Browser cache. Hard-refresh, or restart the kiosk.</td></tr>
       </tbody>
@@ -829,6 +1001,10 @@ ch  1 = strip brightness   2 = MOSFET dimmer
   <p>Every identity in the system, in one place. The ESP32-S3 reports its MAC as
   its USB serial, so the same string identifies a board on the bench, on the hub,
   and over ESP-NOW — which is what makes a single registry possible at all.</p>
+  <p>One exception, and it is the reason the dash bridge row reads differently: that
+  board is reached over its <em>UART</em> port, so the host sees a CH340 rather than the
+  ESP32. Its MAC is real and confirmed, but it reaches the Pi as data in the protocol,
+  not as a USB descriptor udev can match.</p>
 
   <h3>ESP32 boards</h3>
   <div class="tablewrap">
@@ -841,7 +1017,7 @@ ch  1 = strip brightness   2 = MOSFET dimmer
             <td class="mono">D0:CF:13:24:DB:B8</td>
             <td class="mono">/dev/idrive</td>
             <td class="mono">core 3.3.10</td>
-            <td class="mono">idrive_controller v1.6.0</td></tr>
+            <td class="mono">idrive_controller v1.7.0</td></tr>
         <tr><td><b>Lighting output</b><br/><span class="mono">Lonely Binary N16R8</span></td>
             <td class="mono">3C:DC:75:40:0B:F0</td>
             <td class="mono">/dev/lighting</td>
@@ -857,6 +1033,11 @@ ch  1 = strip brightness   2 = MOSFET dimmer
             <td class="mono">/dev/gauges2</td>
             <td class="mono">core 2.0.14</td>
             <td class="mono">none yet</td></tr>
+        <tr><td><b>Dash bridge</b><br/><span class="mono">Lonely Binary N16R8</span></td>
+            <td class="mono">3C:DC:75:40:0B:D8<br/>USB serial 3CDC75400BD8</td>
+            <td class="mono">/dev/tsdash<br/>(by hub port)</td>
+            <td class="mono">core 3.3.10<br/>USBMode=default</td>
+            <td class="mono">dash_bridge v1.1.0</td></tr>
         <tr><td><b>Lighting knob</b><br/><span class="mono">CrowPanel 1.28"</span></td>
             <td class="mono">not on the hub</td>
             <td class="mono">—</td>
@@ -866,10 +1047,13 @@ ch  1 = strip brightness   2 = MOSFET dimmer
     </table>
   </div>
   <div class="note">
-    <p><strong>The two gauge panels are near-sequential MACs from one batch</strong>
-    — <code>…19:9C</code> and <code>…18:D4</code>. Only the full serial tells them
-    apart, which is exactly why every board is pinned by serial rather than by
-    vendor. Adding the hub already reshuffled <code>ttyACM</code> numbering once.</p>
+    <p><strong>Two separate batch collisions live in this table.</strong> The gauge
+    panels are <code>…19:9C</code> and <code>…18:D4</code>; the lighting board and the
+    dash bridge are <code>…0B:F0</code> and <code>…0B:D8</code>. Only the full serial
+    tells any of them apart, which is exactly why boards are pinned by serial rather
+    than by vendor — adding the hub already reshuffled <code>ttyACM</code> numbering
+    once. The bridge is the one that cannot be pinned that way, so the backend checks
+    the MAC it reports instead.</p>
   </div>
 
   <h3>Hosts and services</h3>
@@ -886,6 +1070,9 @@ ch  1 = strip brightness   2 = MOSFET dimmer
         <tr><td>mDNS</td><td class="mono">944HVACPi.local</td>
             <td>unreliable — has cached stale leases and resolves to a dead
                 IPv6 record; use <code>ssh -4</code></td></tr>
+        <tr><td>TSDash Pi</td><td class="mono">tsdash.local · 192.168.1.93</td>
+            <td>MAC <code>2C:CF:67:7E:D7:D7</code>; VNC 5900 only, <b>no SSH</b>.
+                Not networked to the HVAC Pi in the car — hence the bridge.</td></tr>
         <tr><td>Dashboard</td><td class="mono">http://944HVACPi.local:8000</td>
             <td>WebSocket at <code>/ws</code>, REST at <code>/api/state</code></td></tr>
       </tbody>
@@ -909,6 +1096,12 @@ ch  1 = strip brightness   2 = MOSFET dimmer
             <td>cmds 0x02 vol+ · 0x98 vol− · 0xE2 mute · 0x90 next · 0xE0 prev</td></tr>
         <tr><td>ESP-NOW</td><td class="mono">0xAA / 0xBB</td>
             <td>knob&rarr;output / output&rarr;knob, 4-byte packets</td></tr>
+        <tr><td>USB HID</td><td class="mono">Ctrl+&rarr; / Ctrl+&larr;<br/>Ctrl+&uarr; / Ctrl+&darr;</td>
+            <td>TS Dash: next dash · prev dash · config · main dash</td></tr>
+        <tr><td>USB</td><td class="mono">303a:1001</td>
+            <td>dash bridge as a HID keyboard, "944S Dash Bridge"</td></tr>
+        <tr><td>USB</td><td class="mono">1a86:7522</td>
+            <td>the bridge's CH340 UART side — <b>no serial number</b></td></tr>
         <tr><td>I²C</td><td class="mono">0x48</td><td>ADS1115 — on the Pi <em>and</em> on gauge panel A</td></tr>
         <tr><td>1-Wire</td><td class="mono">bd3d51 / be5d11 / bbdd26</td>
             <td>DS18B20 duct / exterior / cabin — no <code>28-</code> prefix</td></tr>
@@ -926,7 +1119,7 @@ ch  1 = strip brightness   2 = MOSFET dimmer
 
 <footer>
   944S restomod electronics · pin data read from hvac_backend.py,
-  idrive_controller.ino v1.6.0, pwm_controller.ino ·
+  idrive_controller.ino v1.7.0, pwm_controller.ino, dash_bridge.ino v1.1.0 ·
   source at <code>docs/system-map.html</code> in pelosim/944_HVAC
 </footer>
 
