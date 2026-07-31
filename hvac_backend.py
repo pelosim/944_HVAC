@@ -229,7 +229,7 @@ class HVACState:
     # client; these fields exist only so the dashboard can mirror the
     # physical knob on screen — which mode it is in, what it owns, and
     # how far it has been turned.
-    idrive_mode: str = "radio"        # radio | hvac | illum | gauge
+    idrive_mode: str = "radio"        # radio | hvac | illum | gauge | tsdash
     idrive_detents: int = 0           # signed running total; rotates the mirror
     idrive_action: str = ""           # last action name, for the caption
     idrive_active: bool = False       # True briefly after any knob input
@@ -730,7 +730,7 @@ class HVACController:
         # deployments and can be updated hours apart, so the link must not
         # break just because one side is newer than the other.
         mode = {"media": "radio", "light": "illum"}.get(mode, mode)
-        if mode in ("radio", "hvac", "illum", "gauge"):
+        if mode in ("radio", "hvac", "illum", "gauge", "tsdash"):
             self.state.idrive_mode = mode
         self.state.idrive_action = action
         self.state.idrive_last_s = time.monotonic()
@@ -778,24 +778,27 @@ class HVACController:
         elif action == "LIGHT_TOGGLE":
             lighting_send("L ADJ 3 1")      # any nudge toggles the dome relay
 
-        # ── TSDash gauge screens ──────────────────────────────────
-        # Knob tilt left/right in GAUGE mode pages the TunerStudio dash on
-        # the TSDash Pi. Exactly one keystroke per event regardless of
-        # `count`: TS Dash has a short list of dash tabs, and a knob flick
-        # that fired eight Ctrl+Rights would leave the driver somewhere
-        # unpredictable with no way to see where they landed. The bridge
+        # ── TSDash gauge screens (OPTION button → TSDASH mode) ────
+        # Exactly one keystroke per event regardless of `count`. TS Dash
+        # has a short list of dash tabs, and a knob flick that fired eight
+        # Ctrl+Rights would leave the driver somewhere unpredictable with
+        # no way to see where they landed — the bridge types blind and
         # cannot read back which dash is showing, so overshoot is not
-        # recoverable — deliberately slower than the knob can turn.
-        elif action == "GAUGE_PAGE_NEXT":
+        # recoverable. Deliberately slower than the knob can turn.
+        elif action == "TSDASH_NEXT":
             tsdash_send("D NEXT")
-        elif action == "GAUGE_PAGE_PREV":
+        elif action == "TSDASH_PREV":
             tsdash_send("D PREV")
+        elif action == "TSDASH_CFG":
+            tsdash_send("D CFG")
+        elif action == "TSDASH_HOME":
+            tsdash_send("D HOME")
 
-        # GAUGE_SCROLL_UP/DOWN and GAUGE_SELECT are deliberately unbound.
-        # Rotation is the easiest input to trigger by accident and TS Dash
-        # has nothing safe to bind it to; leave them reported-only until
-        # there is a reason. MEDIA actions (volume/mute/track) stay
-        # unbound too — the head unit is driven by IR, not by the Pi.
+        # GAUGE_* stays unbound on purpose. GAUGE is the NAV button and
+        # belongs to the backup cluster (the two T-Display-S3-Long panels),
+        # which has no Pi protocol yet — a different screen from TSDASH and
+        # not to be conflated with it. MEDIA actions (volume/mute/track)
+        # stay unbound too: the head unit is driven by IR, not by the Pi.
         if cmd:
             self.apply_command(cmd)
         else:
