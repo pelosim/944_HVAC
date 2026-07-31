@@ -608,7 +608,7 @@ ch  1 = strip brightness   2 = MOSFET dimmer
       <span class="expect">visible slow pulsing, no buzz from the MOSFET board</span></li>
     <li><b>iDrive on CAN, bench-powered</b>
       <span>120&Omega; termination fitted, grounds common. It needs one physical button press
-      to wake on the bench.</span>
+      to wake on the bench — see the open item below before treating that as a fault.</span>
       <span class="expect">serial shows PRESS lines for all 14 inputs</span></li>
     <li><b>iDrive UART into the Pi</b>
       <span>Turn the knob in HVAC mode and watch the setpoint follow on screen.</span>
@@ -622,6 +622,29 @@ ch  1 = strip brightness   2 = MOSFET dimmer
       then enable the udev line.</span>
       <span class="expect">/dev/lighting appears · backend logs "lighting link up"</span></li>
   </ol>
+
+  <div class="note stop">
+    <p><strong>Open — bench auto-wake needs a live BMW CAN capture.</strong> The knob still
+    requires one physical button press before it starts talking on the bench. The firmware
+    sends the whole documented wake set — <code>0x202:FD</code> twice at boot, then
+    <code>0x0AA</code> / <code>0x130</code> / <code>0x440</code> / <code>0x560</code> at
+    20 ms and <code>0x563:63</code> at 1 s — and the wake loop gives up after 10 s with
+    <em>"Wake timeout — physical button press required"</em>. Everything works normally
+    after that press, so this blocks unattended bench sessions, not function.</p>
+    <p>The suspect is the <code>0x5E7</code> &rarr; <code>0x273</code> init handshake. Our
+    <code>0x273</code> reply is a guess: <code>0x5E7</code> byte 4 never reaches
+    <code>0x01</code> (fully initialised) without a real car on the bus, so the controller
+    never considers itself woken and waits for a human instead.</p>
+    <p><strong>The capture to take.</strong> Sniff a running F-series — the 2014 428i — with
+    <code>canclaude</code> on the K-CAN, and log every <code>0x5E7</code> alongside the
+    <code>0x273</code> the real CIC/head unit answers with, from key-on through the moment
+    the knob lights up. Byte-for-byte payload and the reply latency are both wanted; ID
+    presence alone will not settle it. Same session, grab whatever else appears before the
+    first <code>0x25B</code> — the true wake trigger may be a frame we are not sending at
+    all rather than a malformed reply.</p>
+    <p><strong>Do not send <code>0x440</code> with byte 1 = <code>0xFF</code></strong> while
+    experimenting. That is the sleep request, and it puts the controller down faster.</p>
+  </div>
 </section>
 
 <section id="traps">
@@ -877,7 +900,11 @@ ch  1 = strip brightness   2 = MOSFET dimmer
         <tr><td>CAN</td><td class="mono">0x25B</td><td>iDrive — all 14 inputs, 500 kbps</td></tr>
         <tr><td>CAN</td><td class="mono">0x202 / 0x563 / 0x0AA / 0x130 / 0x440 / 0x560</td>
             <td>keep-alives the iDrive needs to stay awake</td></tr>
-        <tr><td>CAN</td><td class="mono">0x5E7 &rarr; 0x273</td><td>init handshake, reply format unconfirmed</td></tr>
+        <tr><td>CAN</td><td class="mono">0x5E7 &rarr; 0x273</td>
+            <td>init handshake — reply format is a guess, and the reason the knob needs a
+            button press on the bench. Open: capture it off the 428i (see &sect;07)</td></tr>
+        <tr><td>CAN</td><td class="mono">0x440 byte1 = 0xFF</td>
+            <td><b>sleep request</b> — never send it</td></tr>
         <tr><td>IR</td><td class="mono">NEC addr 0x00</td>
             <td>cmds 0x02 vol+ · 0x98 vol− · 0xE2 mute · 0x90 next · 0xE0 prev</td></tr>
         <tr><td>ESP-NOW</td><td class="mono">0xAA / 0xBB</td>
