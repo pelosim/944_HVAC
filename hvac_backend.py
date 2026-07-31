@@ -246,6 +246,14 @@ class HVACState:
     illum_relay: bool = False         # dome light
     illum_night: bool = False         # illumination sense: headlights on
 
+    # ── TSDash bridge (ESP32 HID keyboard board, over USB) ────────
+    # Write-only. The bridge types Ctrl+Left/Right at the TSDash Pi and
+    # has no way to read back which dash is showing, so there is no
+    # "current dash" field here and there must never be one — see
+    # tsdash_send() for why.
+    tsdash_online: bool = False       # serial link to the bridge is up
+    tsdash_last: str = ""             # last command sent, for the mirror
+
     def to_json(self):
         return json.dumps(asdict(self))
 
@@ -689,6 +697,13 @@ class HVACController:
             page = str(cmd["aux_display"]).lower()
             if page in ("clock", "gmeter"):
                 self.state.aux_display = page
+        if "tsdash" in cmd:
+            # Page the TunerStudio dash on the TSDash Pi. Nothing is stored:
+            # this is a fire-and-forget keystroke, and there is no state here
+            # to persist because we cannot see which dash is showing.
+            move = str(cmd["tsdash"]).lower()
+            if move in ("next", "prev", "cfg", "home"):
+                tsdash_send("D " + move.upper())
         # Persist user settings after every command
         self._save_state()
 
@@ -763,9 +778,24 @@ class HVACController:
         elif action == "LIGHT_TOGGLE":
             lighting_send("L ADJ 3 1")      # any nudge toggles the dome relay
 
-        # MEDIA actions (volume/mute/track) and the LIGHT/GAUGE modes are
-        # reported for the mirror but have no backend command yet — the
-        # head unit is driven by IR, not by the Pi.
+        # ── TSDash gauge screens ──────────────────────────────────
+        # Knob tilt left/right in GAUGE mode pages the TunerStudio dash on
+        # the TSDash Pi. Exactly one keystroke per event regardless of
+        # `count`: TS Dash has a short list of dash tabs, and a knob flick
+        # that fired eight Ctrl+Rights would leave the driver somewhere
+        # unpredictable with no way to see where they landed. The bridge
+        # cannot read back which dash is showing, so overshoot is not
+        # recoverable — deliberately slower than the knob can turn.
+        elif action == "GAUGE_PAGE_NEXT":
+            tsdash_send("D NEXT")
+        elif action == "GAUGE_PAGE_PREV":
+            tsdash_send("D PREV")
+
+        # GAUGE_SCROLL_UP/DOWN and GAUGE_SELECT are deliberately unbound.
+        # Rotation is the easiest input to trigger by accident and TS Dash
+        # has nothing safe to bind it to; leave them reported-only until
+        # there is a reason. MEDIA actions (volume/mute/track) stay
+        # unbound too — the head unit is driven by IR, not by the Pi.
         if cmd:
             self.apply_command(cmd)
         else:
@@ -947,7 +977,6 @@ LIGHT_STEP    = 8          # brightness units per knob detent (0-255 range)
 _lighting_port = None                    # serial.Serial when the link is up
 _lighting_lock = threading.Lock()
 
-
 def lighting_send(line: str):
     """Send one command line to the lighting board, if it is connected."""
     with _lighting_lock:
@@ -1016,6 +1045,98 @@ def lighting_reader_loop():
                             LIGHTING_PORT, e)
                 complained = True
             time.sleep(5)
+# ── TSDash bridge board ────────────────────────────────────────
+# A spare ESP32-S3 with two USB ports: its UART port is on our hub (this
+# link), and its native USB port is plugged into the TSDash Pi, where it
+# enumerates as a plain HID keyboard. TS Dash has documented shortcuts —
+# Ctrl+Right / Ctrl+Left move between dashes — so the bridge just types
+# them. The TSDash Pi needs nothing installed on it at all, which is the
+# whole reason for this route: it has no SSH and no network in the car.
+#
+# Note this appears as ttyUSB* (a CH340/CP2102 bridge chip), not ttyACM*
+# like the other three boards, which are all native-USB CDC.
+# Protocol lives in the idrive-controller repo's dash_bridge.ino.
+TSDASH_PORT = "/dev/tsdash"
+TSDASH_BAUD = 115200
+
+_tsdash_port = None                      # serial.Serial when the link is up
+_tsdash_lock = threading.Lock()
+
+
+def tsdash_send(cmd: str):
+    """Send one command to the TSDash bridge, if it is connected.
+
+    Relative moves only — NEXT and PREV, never "go to dash 3". The bridge
+    types blind into a Pi we cannot query, and the TSDash screen can also
+    be swiped by hand, so any dash index cached here would be wrong the
+    moment anyone touched it. Same reasoning as the lighting board's
+    L ADJ: the device that owns the state stays the owner.
+    """
+    with _tsdash_lock:
+        port = _tsdash_port
+    if port is None:
+        log.debug("tsdash: %s dropped — link down", cmd)
+        return
+    try:
+        port.write((cmd + "\n").encode())
+        controller.state.tsdash_last = cmd
+    except Exception as e:
+        log.warning("tsdash: write failed: %s", e)
+
+
+def tsdash_reader_loop():
+    """Hold the bridge port open and mirror its status reports."""
+    global _tsdash_port
+    try:
+        import serial
+    except ImportError:
+        log.warning("tsdash link disabled — pyserial not installed")
+        return
+
+    complained = False
+    while True:
+        try:
+            port = serial.Serial(TSDASH_PORT, TSDASH_BAUD, timeout=1)
+            with _tsdash_lock:
+                _tsdash_port = port
+            controller.state.tsdash_online = True
+            complained = False
+            log.info("tsdash link up on %s", TSDASH_PORT)
+            port.write(b"D PING\n")       # prove the far end answers
+
+            # readline(), never `for line in port` — same trap as the
+            # lighting loop: iteration ends on the first read timeout,
+            # which an idle knob guarantees.
+            while True:
+                raw = port.readline()
+                if not raw:
+                    continue
+                line = raw.decode("utf-8", errors="replace").strip()
+                # The bridge prints a banner on boot; only JSON is protocol.
+                if not line.startswith("{"):
+                    continue
+                try:
+                    evt = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if evt.get("src") != "dash":
+                    continue
+                # usb=0 means the bridge is powered and listening to us but
+                # the TSDash Pi has not enumerated it — keystrokes go
+                # nowhere. Worth a log line; not worth refusing to send.
+                if not int(evt.get("usb", 1)):
+                    log.debug("tsdash: bridge up but TSDash Pi not enumerated")
+        except Exception as e:
+            with _tsdash_lock:
+                _tsdash_port = None
+            controller.state.tsdash_online = False
+            if not complained:
+                log.warning("tsdash link unavailable (%s): %s — retrying",
+                            TSDASH_PORT, e)
+                complained = True
+            time.sleep(5)
+
+
 # IDRIVE_ACTIVE_S lives with the other loop constants near the top.
 
 
@@ -1070,6 +1191,8 @@ async def startup():
                      name="idrive-reader").start()
     threading.Thread(target=lighting_reader_loop, daemon=True,
                      name="lighting-reader").start()
+    threading.Thread(target=tsdash_reader_loop, daemon=True,
+                     name="tsdash-reader").start()
     log.info("HVAC controller started — %s mode", "SIMULATION" if SIMULATE else "HARDWARE")
 
 
