@@ -68,15 +68,31 @@ def verdict_flap(mv_list):
     return f"steady, reads {pct:5.1f}% of travel"
 
 
-def verdict_accel(mv_list, axis):
+def verdict_accel(mv_list, axis, floating_ref=None):
+    """Interpret one ADXL335 axis.
+
+    floating_ref is the mean of A3, which is wired to nothing. It is the
+    control: a disconnected input does not read zero, it settles at whatever
+    leakage the pin sees — and every floating pin on the same chip settles at
+    roughly the SAME place. So an axis sitting within a few mV of A3 is
+    almost certainly not connected, however steady it looks. Without that
+    check this function cheerfully reported a floating pin as "-3.22 g".
+    """
     lo, hi = min(mv_list), max(mv_list)
     spread, mean = hi - lo, sum(mv_list) / len(mv_list)
-    if spread > 120:
-        return f"UNSTABLE (±{spread:.0f} mV) — input floating? ADXL335 not wired?"
+    if axis == "spare":
+        return f"unused — floating, ignore ({spread:.0f} mV of drift)"
     # Zero g sits near half supply; Z also carries 1 g when level.
     expect = 1980 if axis == "Z axis" else 1650
-    off = mean - expect
-    g = off / 330.0
+    g = (mean - expect) / 330.0
+    if floating_ref is not None and abs(mean - floating_ref) < 25:
+        return (f"NOT CONNECTED — sits at {mean:.0f} mV, the same place as the "
+                f"unused A3 pin ({floating_ref:.0f} mV)")
+    if abs(g) > 2.0:
+        return (f"implausible ({g:+.1f} g sitting still) — not connected, or "
+                f"wired to the wrong ADXL335 pin. Expected near {expect} mV.")
+    if spread > 120:
+        return f"UNSTABLE (±{spread:.0f} mV) — check this axis's wire"
     if mean < 200:
         return "near 0 V — ADXL335 not powered, or output not connected"
     return f"steady — {g:+.2f} g from the {expect} mV zero point"
@@ -105,6 +121,7 @@ def main():
                  0x49: "ADS1115 #2 — accelerometer",
                  0x4a: "ADS1115, ADDR strapped to SDA",
                  0x4b: "ADS1115, ADDR strapped to SCL",
+                 0x57: "AT24C32 EEPROM — normal, it rides on the DS3231 module",
                  0x68: "DS3231 RTC"}
         for a in present:
             print(f"  {hex(a)}  {names.get(a, 'unrecognised device')}")
@@ -142,10 +159,11 @@ def main():
         if data is None:
             print("  not responding")
             continue
+        ref = sum(data[3]) / len(data[3])   # A3 is unused on both boards
         for ch in range(4):
             mv = data[ch]
             mean = sum(mv) / len(mv)
-            v = (verdict(mv, chmap[ch]) if verdict is verdict_accel
+            v = (verdict(mv, chmap[ch], ref) if verdict is verdict_accel
                  else verdict(mv))
             print(f"  A{ch} {chmap[ch]:<18} {mean:7.1f} mV   {v}")
 

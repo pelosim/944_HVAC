@@ -22,11 +22,30 @@ set -euo pipefail
 CFG=/boot/firmware/config.txt
 
 echo "==> 1. Checking the DS3231 is on the bus (expect 0x68)..."
-if sudo i2cdetect -y 1 | grep -qE '(^60:.* 68| 68 | UU)'; then
-  echo "    DS3231 detected."
+# i2cdetect comes from i2c-tools, which is NOT installed on this Pi — the
+# script aborted here on first use with "command not found", pointing at the
+# RTC when the real problem was a missing package. Probe in Python instead,
+# which is always present, and only fall back to i2cdetect if it exists.
+if command -v i2cdetect >/dev/null 2>&1; then
+  FOUND=$(sudo i2cdetect -y 1 | grep -cE '(^60:.* 68| 68 | UU)' || true)
+else
+  FOUND=$(python3 - <<'PROBE'
+try:
+    import smbus2 as smb
+except ImportError:
+    import smbus as smb
+try:
+    smb.SMBus(1).read_byte(0x68)
+    print(1)
+except Exception:
+    print(0)
+PROBE
+)
+fi
+if [ "${FOUND:-0}" != "0" ]; then
+  echo "    DS3231 detected at 0x68."
 else
   echo "!!  DS3231 NOT found at 0x68. Check 3V3/GND/SDA(GPIO2)/SCL(GPIO3) and re-run."
-  sudo i2cdetect -y 1
   exit 1
 fi
 
