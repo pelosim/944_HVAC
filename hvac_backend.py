@@ -114,6 +114,35 @@ ADS_FOOT_CHANNEL   = 2   # P2 — footwell flap feedback
 ADC_MV_MIN = 225     # mV at 0% position
 ADC_MV_MAX = 4090    # mV at 100% position
 
+# --- Vent distribution -------------------------------------------
+# There is no face flap. Defrost and footwell are DIVERTERS, and face gets
+# whatever they do not take — which is why face can only ever be commanded
+# indirectly, by making room for it.
+#
+# These are flap POSITIONS, not airflow shares. Ducting is nonlinear and the
+# split shifts with fan speed, so 50% foot is a position you learn the feel
+# of, not half the air. Repeatable and controllable; not a measurement.
+VENT_PRESETS = {
+    "face":         {"defrost":   0, "foot":  0},
+    "bilevel":      {"defrost":   0, "foot": 50},
+    # 15% defrost in FOOT is a deliberate bleed to keep the screen clear —
+    # production cars do the same, for the same reason outside air is forced
+    # below when defrost is high.
+    "feet":         {"defrost":  15, "foot": 75},
+    "feet_defrost": {"defrost":  50, "foot": 50},
+    "defrost":      {"defrost": 100, "foot":  0},
+}
+VENT_MODE_ORDER = ["face", "bilevel", "feet", "feet_defrost", "defrost"]
+
+# Button steps. Face never offers 0: it is the default path, "no face at all"
+# is not a thing the ducting does, and a step nobody wants costs a press
+# every time round the cycle.
+VENT_STEPS = [0, 25, 50, 75, 100]
+FACE_STEPS = [25, 50, 75, 100]
+
+# Above this much defrost, force outside air — recirculated air fogs a screen.
+DEFROST_FRESH_AIR_PCT = 75
+
 # --- Per-flap feedback calibration -------------------------------
 # Measured end stop to end stop with deploy/flap-pulse.py on 2026-08-02,
 # at ADC gain 2/3. One global pair could never have worked: the three
@@ -236,7 +265,11 @@ class HVACState:
     ac_on: bool = False
     heat_valve: bool = False
     outside_air: bool = True
-    vent_mode: str = "face"
+    vent_mode: str = "face"       # a VENT_PRESETS name, or "custom"
+    # Diverter positions are the source of truth; face is derived from them.
+    defrost_level: float = 0.0
+    foot_level: float = 0.0
+    face_level: float = 100.0
 
     # Sensor readings
     mix_chamber_temp_f: float = 0.0
@@ -834,9 +867,11 @@ class HVACController:
         if "outside_air" in cmd:
             self.state.outside_air = bool(cmd["outside_air"])
         if "vent_mode" in cmd:
-            mode = cmd["vent_mode"].lower()
-            if mode in ("face", "bilevel", "feet", "defrost"):
-                self.state.vent_mode = mode
+            self.set_vent_mode(str(cmd["vent_mode"]).lower())
+        if "vent_cycle" in cmd:
+            outlet = str(cmd["vent_cycle"]).lower()
+            if outlet in ("face", "foot", "defrost"):
+                self.cycle_vent(outlet)
         if "seat_heat_driver" in cmd:
             self.state.seat_heat_driver = max(0, min(100, float(cmd["seat_heat_driver"])))
         if "seat_heat_passenger" in cmd:
@@ -863,6 +898,63 @@ class HVACController:
                 tsdash_send("D " + move.upper())
         # Persist user settings after every command
         self._save_state()
+
+    # ── Vent distribution ─────────────────────────────────────────
+    def _publish_vent(self, defrost, foot):
+        """Store diverter positions, derive face, and re-label the mode."""
+        d = max(0.0, min(100.0, float(defrost)))
+        f = max(0.0, min(100.0, float(foot)))
+        self.state.defrost_level = round(d, 1)
+        self.state.foot_level = round(f, 1)
+        self.state.face_level = round(max(0.0, 100.0 - d - f), 1)
+        # A preset is just a named point in this space. Land on one and we
+        # say so; move off it and the label goes to "custom" rather than
+        # lying about which mode you are in.
+        self.state.vent_mode = "custom"
+        for name, p in VENT_PRESETS.items():
+            if abs(p["defrost"] - d) < 0.6 and abs(p["foot"] - f) < 0.6:
+                self.state.vent_mode = name
+                break
+
+    def set_vent_mode(self, mode: str):
+        p = VENT_PRESETS.get(mode)
+        if p:
+            self._publish_vent(p["defrost"], p["foot"])
+
+    def cycle_vent(self, outlet: str):
+        """Advance one outlet button by a step, wrapping at the top.
+
+        Wrapping matters because each outlet is a single button: without it
+        there is no way back to off without a second gesture, and there is
+        nowhere good to put one.
+        """
+        d, f = self.state.defrost_level, self.state.foot_level
+
+        def next_step(current, steps):
+            for v in steps:
+                if v > current + 0.6:
+                    return v
+            return steps[0]
+
+        if outlet == "defrost":
+            self._publish_vent(next_step(d, VENT_STEPS), f)
+        elif outlet == "foot":
+            self._publish_vent(d, next_step(f, VENT_STEPS))
+        elif outlet == "face":
+            # Face is the remainder, so asking for more of it means taking it
+            # back off the diverters. Scale them PROPORTIONALLY rather than
+            # zeroing: the mix you had — mostly defrost, a little foot — is
+            # information you did not ask to throw away.
+            target = next_step(self.state.face_level, FACE_STEPS)
+            budget = 100.0 - target
+            total = d + f
+            if total <= 0.1:
+                # Coming from all-face there is no ratio to preserve. Put it
+                # all into foot: that is the outlet people actually reach for
+                # second, and an arbitrary even split would be a worse guess.
+                self._publish_vent(0.0, budget)
+            else:
+                self._publish_vent(d * budget / total, f * budget / total)
 
     # ── iDrive knob ───────────────────────────────────────────────
     def apply_idrive_event(self, evt: dict):
@@ -911,7 +1003,7 @@ class HVACController:
         elif action == "HVAC_TOGGLE":
             cmd["ac_on"] = not self.state.ac_on
         elif action in ("HVAC_MODE_NEXT", "HVAC_MODE_PREV"):
-            order = ["face", "bilevel", "feet", "defrost"]
+            order = VENT_MODE_ORDER
             i = order.index(self.state.vent_mode) if self.state.vent_mode in order else 0
             step = 1 if action == "HVAC_MODE_NEXT" else -1
             cmd["vent_mode"] = order[(i + step) % len(order)]
@@ -1054,20 +1146,17 @@ class HVACController:
         if self.state.ac_on and self.state.fan_speed == "OFF":
             self.state.fan_speed = "LOW"
 
-        # Defrost mode forces outside air (prevents fogging)
-        if self.state.vent_mode == "defrost":
+        # Heavy defrost forces outside air — recirculated air fogs a screen.
+        # Keyed on the LEVEL, not the mode name, so it still holds when you
+        # have dialled defrost up by hand and left the presets behind.
+        if self.state.defrost_level >= DEFROST_FRESH_AIR_PCT:
             self.state.outside_air = True
 
-        # ── Compute flap targets from vent mode ───────────────
-        mode_targets = {
-            "face":    {"defrost": 0,   "footwell": 0},
-            "bilevel": {"defrost": 0,   "footwell": 100},
-            "feet":    {"defrost": 0,   "footwell": 100},
-            "defrost": {"defrost": 100, "footwell": 0},
-        }
-        targets = mode_targets.get(self.state.vent_mode, mode_targets["face"])
-        self.state.defrost_flap_target = targets["defrost"]
-        self.state.footwell_flap_target = targets["footwell"]
+        # ── Flap targets come straight from the diverter levels ───
+        # Face needs no target because it has no flap: it is whatever these
+        # two leave behind.
+        self.state.defrost_flap_target = self.state.defrost_level
+        self.state.footwell_flap_target = self.state.foot_level
 
         # ── Temperature PID → mixing flap target ──────────────
         # Closed-loop on CABIN (interior) temp: modulate the blend flap to

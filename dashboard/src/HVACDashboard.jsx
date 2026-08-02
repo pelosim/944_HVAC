@@ -368,6 +368,52 @@ function KnobBadge({ mode, action, active }) {
   );
 }
 
+// ════════════════════════════════════════════════════════════════
+// OUTLET BUTTON — the button IS the gauge
+// ════════════════════════════════════════════════════════════════
+// Fills from the bottom in proportion to its level, with ticks at the
+// quarter steps a press moves through. Fill is continuous rather than four
+// blocks because presets do not land on quarters — FEET carries a 15%
+// defrost bleed, and four blocks would have to round that to nothing or to
+// a quarter, either of which is a lie about where the flap is.
+function OutletButton({ label, icon, level, color, onPress }) {
+  const on = level > 0.5;
+  return (
+    <button onClick={onPress} style={{
+      position: "relative", overflow: "hidden",
+      display: "flex", flexDirection: "column", alignItems: "center",
+      justifyContent: "center", gap: 4, flex: 1, height: "100%", minWidth: 0,
+      borderRadius: 8, border: `1.5px solid ${on ? color : C.line}`,
+      background: `linear-gradient(180deg, ${C.fasciaHi}, ${C.fascia})`,
+      boxShadow: on ? `0 0 20px ${color}35` : "0 2px 6px rgba(0,0,0,0.45)",
+      transition: "border-color 0.18s ease, box-shadow 0.18s ease",
+    }}>
+      <div style={{
+        position: "absolute", left: 0, right: 0, bottom: 0, height: `${level}%`,
+        background: `linear-gradient(180deg, ${color}3a, ${color}14)`,
+        borderTop: on ? `2px solid ${color}` : "none",
+        transition: "height 0.3s ease",
+      }} />
+      {[25, 50, 75].map((t) => (
+        <div key={t} style={{
+          position: "absolute", left: 0, right: 0, bottom: `${t}%`, height: 1,
+          background: "rgba(255,255,255,0.10)",
+        }} />
+      ))}
+      <div style={{ position: "relative", display: "flex", flexDirection: "column",
+                    alignItems: "center", gap: 2 }}>
+        <Icon name={icon} size={46} color={on ? color : C.mid} sw={1.6} glow={on} />
+        <span style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 23, fontWeight: 700,
+                       letterSpacing: 2, textTransform: "uppercase",
+                       color: on ? color : C.mid }}>{label}</span>
+        <span style={{ fontFamily: "'Orbitron',monospace", fontSize: 19, fontWeight: 700,
+                       fontVariantNumeric: "tabular-nums",
+                       color: on ? color : C.dim }}>{Math.round(level)}%</span>
+      </div>
+    </button>
+  );
+}
+
 function SystemStatus({ st, onClose }) {
   // ── Derive each link's state from what the backend can actually see ──
   const flapFault = st.mixFault || st.defFault || st.footFault;
@@ -531,6 +577,9 @@ export default function HVACDashboard() {
   const [heatValve, setHeatValve] = useState(false);
   const [outsideAir, setOutsideAir] = useState(true);
   const [ventMode, setVentMode] = useState("face");
+  const [defrostLevel, setDefrostLevel] = useState(0);
+  const [footLevel, setFootLevel] = useState(0);
+  const [faceLevel, setFaceLevel] = useState(100);
   const [maxAc, setMaxAc] = useState(false);
   const [driverSeatHeat, setDriverSeatHeat] = useState(0);
   const [passengerSeatHeat, setPassengerSeatHeat] = useState(0);
@@ -616,6 +665,9 @@ export default function HVACDashboard() {
           apply("heat_valve", setHeatValve);
           apply("outside_air", setOutsideAir);
           apply("vent_mode", setVentMode);
+          apply("defrost_level", setDefrostLevel);
+          apply("foot_level", setFootLevel);
+          apply("face_level", setFaceLevel);
           apply("mix_chamber_temp_f", setMixTemp);
           apply("exterior_temp_f", setExtTemp);
           apply("interior_temp_f", setInteriorTemp);
@@ -699,6 +751,10 @@ export default function HVACDashboard() {
   const cmdHeatValve = (v) => { setHeatValve(v); sendCmd({ heat_valve: v }); };
   const cmdOutsideAir = (v) => { setOutsideAir(v); sendCmd({ outside_air: v }); };
   const cmdVentMode = (v) => { setVentMode(v); sendCmd({ vent_mode: v }); };
+  // Levels are not echoed optimistically: the backend derives face from the
+  // two diverters and re-labels the mode, and guessing that here would mean
+  // two implementations of the same rule drifting apart.
+  const cmdVentCycle = (outlet) => sendCmd({ vent_cycle: outlet });
   const cmdDriverSeatHeat = (v) => { setDriverSeatHeat(v); sendCmd({ seat_heat_driver: v }); };
   const cmdPassengerSeatHeat = (v) => { setPassengerSeatHeat(v); sendCmd({ seat_heat_passenger: v }); };
   const cmdTestOverride = (v) => {
@@ -1160,23 +1216,42 @@ export default function HVACDashboard() {
         }}>
           {/* Air distribution */}
           <div style={{ flex: 4.4, display: "flex", flexDirection: "column", gap: 8, minWidth: 0 }}>
-            <span style={{ ...labelStyle, fontSize: 22 }}>Air Distribution</span>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
+              <span style={{ ...labelStyle, fontSize: 22 }}>Air Distribution</span>
+              {/* Presets are shortcuts to a level pair, so they live beside the
+                  heading rather than competing with the outlet buttons. The
+                  highlight drops to "custom" the moment you touch a level —
+                  the same way a car's mode light goes out. */}
+              <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
+                {[
+                  { key: "face", label: "Face" },
+                  { key: "bilevel", label: "Bi-Lvl" },
+                  { key: "feet", label: "Feet" },
+                  { key: "feet_defrost", label: "Ft+Def" },
+                  { key: "defrost", label: "Def" },
+                ].map((m) => {
+                  const active = ventMode === m.key;
+                  const col = m.key.includes("defrost") ? C.amber : C.vfd;
+                  return (
+                    <button key={m.key} onClick={() => cmdVentMode(m.key)} style={{
+                      fontFamily: "'Rajdhani',sans-serif", fontSize: 19, fontWeight: 700,
+                      letterSpacing: 1.2, textTransform: "uppercase", padding: "3px 11px",
+                      borderRadius: 6, cursor: "pointer",
+                      border: `1.5px solid ${active ? col : C.line}`,
+                      background: active ? `${col}22` : "transparent",
+                      color: active ? col : C.mid,
+                    }}>{m.label}</button>
+                  );
+                })}
+              </div>
+            </div>
             <div style={{ display: "flex", gap: 10, flex: 1 }}>
-              {[
-                { key: "face", label: "Face", icon: "face" },
-                { key: "bilevel", label: "Bi-Level", icon: "bilevel" },
-                { key: "feet", label: "Feet", icon: "feet" },
-                { key: "defrost", label: "Defrost", icon: "defrost", color: C.amber },
-              ].map((m) => {
-                const active = ventMode === m.key;
-                const col = m.color || C.vfd;
-                return (
-                  <button key={m.key} onClick={() => cmdVentMode(m.key)} style={bigBtn(active, col)}>
-                    <Icon name={m.icon} size={60} color={active ? col : C.mid} sw={1.6} glow={active} />
-                    <span style={btnText(active, col)}>{m.label}</span>
-                  </button>
-                );
-              })}
+              <OutletButton label="Face" icon="face" level={faceLevel} color={C.vfd}
+                onPress={() => cmdVentCycle("face")} />
+              <OutletButton label="Feet" icon="feet" level={footLevel} color={C.vfd}
+                onPress={() => cmdVentCycle("foot")} />
+              <OutletButton label="Defrost" icon="defrost" level={defrostLevel} color={C.amber}
+                onPress={() => cmdVentCycle("defrost")} />
             </div>
           </div>
 
