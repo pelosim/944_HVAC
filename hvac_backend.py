@@ -129,8 +129,12 @@ ADC_MV_MAX = 4090    # mV at 100% position
 # pot DOWN, so raw-low is hot — and the control logic wants 100% = hot.
 FLAP_CAL = {
     ADS_MIX_CHANNEL:  {"lo":  180, "hi": 4848, "invert": True},   # blend
-    ADS_DEF_CHANNEL:  {"lo":  417, "hi": 4971, "invert": False},  # defrost
-    ADS_FOOT_CHANNEL: {"lo":  258, "hi": 4956, "invert": False},  # footwell
+    # Both confirmed against the physical flaps on 2026-08-02: defrost read
+    # 0% while fully OPEN, footwell read 100% while fully CLOSED. Both
+    # inverted, so on all three flaps 100% now means "more" — full hot,
+    # full defrost, foot open.
+    ADS_DEF_CHANNEL:  {"lo":  417, "hi": 4971, "invert": True},   # defrost
+    ADS_FOOT_CHANNEL: {"lo":  258, "hi": 4956, "invert": True},   # footwell
 }
 
 # --- Accelerometer: ADXL335 on a second ADS1115 -------------------
@@ -610,24 +614,28 @@ class HardwareManager:
 
     def drive_mix_flap(self, command: float):
         """Positive = toward HOT, negative = toward COLD."""
-        # Left as-is, and that is deliberate. Blend is wired opposite to the
-        # other two: GPIO23 raises its pot where GPIO16/GPIO12 lower theirs.
-        # Combined with invert=True in FLAP_CAL, driving HOT already raises
-        # the published position. A blanket polarity fix would have broken
-        # exactly this one flap.
+        # GPIO24 is HOT on the harness sheet and drives this pot DOWN;
+        # invert=True turns that into rising position. Self-consistent, and
+        # it matches the control convention of 0% cold / 100% hot.
+        #
+        # NOT yet confirmed against the physical door — the blend flap has a
+        # broken retainer (pre-existing), so the pot may be tracking the
+        # motor while the door itself does not follow. Treat blend position
+        # as unverified until that is repaired.
         self.drive_hbridge(PIN_MIX_HOT, PIN_MIX_COLD, command)
 
     def drive_defrost_flap(self, command: float):
-        # Measured 2026-08-02: IN2 (GPIO20) drives this pot UP. Positive
-        # command means "position must increase", so IN2 is the forward pin.
-        # It was the other way round, which is why the defrost flap ran to
-        # the wrong stop and sat there until the watchdog cut it.
-        self.drive_hbridge(PIN_DEF_IN2, PIN_DEF_IN1, command)
+        # IN2 (GPIO20) drives the pot UP, but invert=True means rising
+        # position is FALLING volts — more defrost. So IN1 is the forward
+        # pin. This is the original pin order, and that is not a
+        # coincidence: the polarity was never the bug. The bug was reading
+        # the pot backwards, which made a correct drive look inverted.
+        self.drive_hbridge(PIN_DEF_IN1, PIN_DEF_IN2, command)
 
     def drive_footwell_flap(self, command: float):
-        # Measured 2026-08-02: IN2 (GPIO21) drives this pot UP. Same
-        # inversion the defrost flap had.
-        self.drive_hbridge(PIN_FOOT_IN2, PIN_FOOT_IN1, command)
+        # Same story as defrost: IN2 raises the pot, invert=True makes
+        # falling volts mean "more open", so IN1 is forward.
+        self.drive_hbridge(PIN_FOOT_IN1, PIN_FOOT_IN2, command)
 
     # ── Sensor Reading ─────────────────────────────────────────
     def read_flap_position(self, channel: int) -> float:
