@@ -30,26 +30,44 @@ FLAP_CH = {0: "blend / temp mix", 1: "defrost", 2: "footwell", 3: "spare"}
 ACCEL_CH = {0: "X axis", 1: "Y axis", 2: "Z axis", 3: "spare"}
 
 
-def read_all(addr):
-    """Return {channel: millivolts} for one ADS1115, or None if absent."""
+def open_ads(addr):
+    """Build ONE ADS1115 + AnalogIn set, or None if the chip is absent.
+
+    Built once and reused. An earlier version constructed a fresh ADS object
+    per sample and then read channel 0 immediately — and the ADS1115 returns
+    the PREVIOUS conversion after a mux change, which was channel 3. So A0
+    reported A3's voltage every time, and the script confidently declared a
+    perfectly good accelerometer axis "NOT CONNECTED". Only the first channel
+    read was ever wrong, which is exactly what made it convincing.
+    """
     import board, busio
     import adafruit_ads1x15.ads1115 as ADS
     from adafruit_ads1x15.analog_in import AnalogIn
     i2c = busio.I2C(board.SCL, board.SDA)
     try:
         ads = ADS.ADS1115(i2c, address=addr)
-        return {ch: AnalogIn(ads, ch).voltage * 1000.0 for ch in range(4)}
+        ads.gain = 1
+        chans = {ch: AnalogIn(ads, ch) for ch in range(4)}
+        for ch in chans:                      # prime the mux
+            chans[ch].voltage
+        return chans
     except Exception:
         return None
 
 
 def sample(addr, n=12, delay=0.08):
     """Sample repeatedly so we can talk about stability, not one lucky read."""
+    chans = open_ads(addr)
+    if chans is None:
+        return None
     runs = []
     for _ in range(n):
-        r = read_all(addr)
-        if r is None:
-            return None
+        r = {}
+        for ch in range(4):
+            # Read twice, keep the second: the first read after a mux change
+            # can still carry the previous channel's conversion.
+            chans[ch].voltage
+            r[ch] = chans[ch].voltage * 1000.0
         runs.append(r)
         time.sleep(delay)
     return {ch: [r[ch] for r in runs] for ch in range(4)}

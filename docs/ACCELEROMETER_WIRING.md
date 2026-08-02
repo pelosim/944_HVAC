@@ -174,8 +174,24 @@ switches from simulated data to live the moment they appear:
 | `g_lateral` | + = right-hand cornering |
 | `g_longitudinal` | + = acceleration, − = braking |
 
-To implement: read `0x49` channels 0–2, apply the §6 calibration, and publish
-both fields in `HVACState`.
+**Implemented 2026-08-02.** `HardwareManager._init_accel()` opens `0x49` and
+`_accel_reader_loop()` samples it at 20 Hz on its own thread; `tick()` reads only
+the cache. `HVACState` publishes `g_lateral`, `g_longitudinal`, `g_vertical`,
+`accel_ok` and `accel_axes_bad`.
+
+Calibration is still the datasheet typicals (`ACCEL_ZERO_MV` 1650,
+`ACCEL_MV_PER_G` 330). Bench readings landed within 6 mV of both, but do the §6
+tumble in the final mounting — there is currently a standing ~0.11 g lateral
+offset that is either real tilt or part spread, and only calibration tells you
+which. `ACCEL_INVERT_X` / `ACCEL_INVERT_Y` set the signs; confirm them in the
+car, not on the bench.
+
+> A floating ADC input does not read zero — it settles wherever leakage puts it,
+> and every floating pin on the same chip settles in the same place. `A3` is wired
+> to nothing and is used as the reference: an axis within 25 mV of it is treated as
+> disconnected, `accel_ok` goes false, and the G-meter falls back rather than
+> drawing a confident dot in the wrong place. A partly-wired accelerometer is not a
+> degraded G-meter, it is a wrong one.
 
 ### ⚠ Read the accelerometer off the control loop
 

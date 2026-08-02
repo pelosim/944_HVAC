@@ -113,6 +113,34 @@ ADS_FOOT_CHANNEL   = 2   # P2 — footwell flap feedback
 ADC_MV_MIN = 225     # mV at 0% position
 ADC_MV_MAX = 4090    # mV at 100% position
 
+# --- Accelerometer: ADXL335 on a second ADS1115 -------------------
+# Mounted flat and square to the car (docs/ACCELEROMETER_WIRING.md §4):
+#   A0 = X = left/right  -> g_lateral       (+ = right-hand turn)
+#   A1 = Y = rear/front  -> g_longitudinal  (+ = acceleration)
+#   A2 = Z = down/up     -> sanity only; should read ~1 g at rest
+ACCEL_I2C_ADDR = 0x49
+ACCEL_CH = {"x": 0, "y": 1, "z": 2}
+ACCEL_REF_CH = 3          # wired to nothing — the floating-pin reference
+
+# Datasheet typicals at 3.3 V. Replace with a real 6-point tumble
+# calibration once the sensor is in its final mounting — see §6. Measured
+# on the bench 2026-08-02: Y 1646 mV and Z 1986 mV at rest, both within
+# 6 mV of these, so the part is close to typical.
+ACCEL_ZERO_MV = 1650.0
+ACCEL_MV_PER_G = 330.0
+
+# An axis reading within this of the unused A3 pin is not connected. A
+# floating ADC input does not read zero — it settles wherever leakage puts
+# it, and every floating pin on the same chip settles in the same place.
+# Without this check a disconnected axis reports a confident, wrong g.
+ACCEL_FLOAT_MV = 25.0
+
+# Sign flips, applied after the zero offset. Set these from the car, not
+# from the bench: push the nose down and g_longitudinal must go NEGATIVE
+# (braking), roll right and g_lateral must go POSITIVE.
+ACCEL_INVERT_X = False
+ACCEL_INVERT_Y = False
+
 # --- PID Tuning ---
 # These are starting points — tune on the car
 FLAP_PID_KP = 2.0    # Proportional gain
@@ -261,6 +289,16 @@ class HVACState:
     tsdash_usb: bool = False          # bridge: a USB host has enumerated it
     tsdash_age_s: float = -1.0        # seconds since the bridge last reported
 
+    # ── Accelerometer / G-meter (ADXL335 on ADS1115 #2) ──────────
+    # The round aux screen's G-meter reads these two. accel_ok is false
+    # whenever any axis looks disconnected, so the display can fall back
+    # rather than draw a confident dot in the wrong place.
+    accel_ok: bool = False
+    g_lateral: float = 0.0            # + = right-hand cornering
+    g_longitudinal: float = 0.0       # + = acceleration, - = braking
+    g_vertical: float = 0.0           # ~+1.0 at rest; sanity check
+    accel_axes_bad: str = ""          # e.g. "x" when an axis reads floating
+
     # ── System status screen ──────────────────────────────────────
     system_view: bool = False         # touchscreen shows the link topology page
 
@@ -349,12 +387,24 @@ class HardwareManager:
         # async control loop stalled the whole event loop to ~0.4Hz.
         self._temp_cache = {}
 
+        # Latest accelerometer reading, filled by its own background thread.
+        # NOT read inline in the control loop: three more I2C conversions per
+        # tick would double the bus traffic the flap reads already generate,
+        # and the DS18B20s already taught this project what blocking the loop
+        # costs (docs/ACCELEROMETER_WIRING.md §7).
+        self._accel_cache = None
+        self._accel_channels = {}
+
         if not SIMULATE:
             self._init_gpio()
             self._init_ads()
+            self._init_accel()
             self._init_temps()
             threading.Thread(target=self._temp_reader_loop, daemon=True,
                              name="ds18b20-reader").start()
+            if self._accel_channels:
+                threading.Thread(target=self._accel_reader_loop, daemon=True,
+                                 name="accel-reader").start()
         else:
             log.info("SIMULATION: Hardware stubs active")
             self._sim_mix_pos = 50.0
@@ -403,6 +453,50 @@ class HardwareManager:
             log.info("ADS1115 initialized at 0x%02X", ADS_I2C_ADDR)
         except Exception as e:
             log.error("ADS1115 init failed: %s", e)
+
+    def _init_accel(self):
+        """Second ADS1115 at 0x49 reading the ADXL335. Optional hardware —
+        absence is logged once and everything else carries on."""
+        try:
+            i2c = busio.I2C(board.SCL, board.SDA)
+            ads = ADS.ADS1115(i2c, address=ACCEL_I2C_ADDR)
+            ads.gain = 1  # ±4.096 V, same as the flap ADC
+            self._accel_channels = {
+                name: AnalogIn(ads, ch) for name, ch in ACCEL_CH.items()
+            }
+            self._accel_channels["ref"] = AnalogIn(ads, ACCEL_REF_CH)
+            log.info("Accelerometer ADS1115 initialized at 0x%02X", ACCEL_I2C_ADDR)
+        except Exception as e:
+            self._accel_channels = {}
+            log.warning("Accelerometer not present at 0x%02X (%s) — G-meter "
+                        "will stay in fallback", ACCEL_I2C_ADDR, e)
+
+    def _accel_reader_loop(self):
+        """Daemon thread: sample the ADXL335 and cache g values.
+
+        20 Hz is plenty — the G-meter is a human-readable display, not a
+        datalogger, and this shares an I2C bus with the flap ADC.
+        """
+        while True:
+            try:
+                mv = {n: c.voltage * 1000.0
+                      for n, c in self._accel_channels.items()}
+                ref = mv.pop("ref")
+                bad = [n for n, v in mv.items()
+                       if abs(v - ref) < ACCEL_FLOAT_MV]
+                g = {n: (v - ACCEL_ZERO_MV) / ACCEL_MV_PER_G
+                     for n, v in mv.items()}
+                self._accel_cache = {"g": g, "bad": bad, "ref_mv": ref}
+            except Exception as e:
+                self._accel_cache = None
+                log.debug("Accel read failed: %s", e)
+            time.sleep(0.05)
+
+    def read_accel(self):
+        """Latest {"g": {x,y,z}, "bad": [axes], "ref_mv": float} or None."""
+        if SIMULATE:
+            return {"g": {"x": 0.0, "y": 0.0, "z": 1.0}, "bad": [], "ref_mv": 0.0}
+        return self._accel_cache
 
     def _init_temps(self):
         try:
@@ -855,6 +949,26 @@ class HVACController:
             self.state.idrive_last_s > 0
             and (now - self.state.idrive_last_s) < IDRIVE_ACTIVE_S
         )
+
+        # ── Accelerometer ─────────────────────────────────────
+        # Cache read only — the sampling happens on its own thread.
+        acc = self.hw.read_accel()
+        if acc is None:
+            self.state.accel_ok = False
+            self.state.accel_axes_bad = ""
+        else:
+            bad = acc["bad"]
+            self.state.accel_axes_bad = "".join(sorted(bad))
+            # Any floating axis makes the whole reading untrustworthy: a
+            # G-meter missing one axis is not a degraded G-meter, it is a
+            # wrong one, and it would put the dot confidently off-centre.
+            self.state.accel_ok = not bad
+            g = acc["g"]
+            lat = -g["x"] if ACCEL_INVERT_X else g["x"]
+            lon = -g["y"] if ACCEL_INVERT_Y else g["y"]
+            self.state.g_lateral = 0.0 if "x" in bad else round(lat, 3)
+            self.state.g_longitudinal = 0.0 if "y" in bad else round(lon, 3)
+            self.state.g_vertical = 0.0 if "z" in bad else round(g["z"], 3)
 
         # ── Link liveness ─────────────────────────────────────
         # idrive_active means "the knob was just touched"; idrive_online means

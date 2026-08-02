@@ -387,6 +387,9 @@ function SystemStatus({ st, onClose }) {
     bridge: st.tsdashOnline ? S_OK : S_BAD,
     hid:    !st.tsdashOnline ? S_UNK : st.tsdashUsb ? S_OK : S_BAD,
     ms3:    S_UNK,                                   // on the other Pi
+    // A partly-wired accelerometer is a fault, not a degraded sensor: the
+    // G-meter would still draw a dot, just in the wrong place.
+    accel:  st.accelOk ? S_OK : st.accelBad ? S_BAD : S_UNK,
   };
   const vals = Object.values(L);
   const nBad = vals.filter((v) => v === S_BAD).length;
@@ -404,6 +407,8 @@ function SystemStatus({ st, onClose }) {
     "no heartbeat since boot - needs firmware 1.8.0"]);
   if (L.bridge === S_BAD) attention.push([C.red, "Pi -> DASH BRIDGE", "/dev/tsdash not answering"]);
   if (L.light === S_BAD) attention.push([C.red, "Pi -> LIGHTING", "/dev/lighting not answering"]);
+  if (L.accel === S_BAD) attention.push([C.red, "G-METER",
+    `axis ${st.accelBad.toUpperCase()} reads as an unconnected pin`]);
   if (L.hw === S_BAD) attention.push([C.red, "HVAC HARDWARE",
     flapFault ? "flap travel fault" : !st.onewireOk ? "1-Wire bus down" : "ADS1115 not answering"]);
   attention.push([C.dim, "HEAD UNIT - IR", "write-only, no feedback path"]);
@@ -448,6 +453,7 @@ function SystemStatus({ st, onClose }) {
         <SysLink d="M466,350 L466,556"   st={L.light}  label="USB"  lx={504} ly={470} />
         <SysLink d="M596,330 L636,494"   st={L.bridge} />
         <SysLink d="M896,522 L936,522"   st={L.hid}    label="HID"  lx={916} ly={506} />
+        <SysLink d="M886,410 L936,410"   st={L.accel}  label="I2C"  lx={911} ly={396} />
         <SysLink d="M1456,522 L1196,522" st={L.ms3}    label="FTDI" lx={1326} ly={506} />
         <SysLink d="M296,588 L336,588"   st={L.espnow} label="NOW"  lx={316} ly={578} />
         <SysLink d="M596,588 L636,588"   st={L.light} />
@@ -470,6 +476,10 @@ function SystemStatus({ st, onClose }) {
           sub={L.hid === S_OK ? "host up" : L.hid === S_BAD ? "no host - usb:0" : "unknown"}
           st={L.hid} />
         <SysNode x={1456} y={490} title="MS3-PRO EVO"   st={L.ms3} />
+        <SysNode x={936} y={378} w={260} title="G-METER"
+          sub={st.accelOk ? `${st.gLat >= 0 ? "+" : ""}${st.gLat.toFixed(2)} lat`
+               : st.accelBad ? `axis ${st.accelBad.toUpperCase()} open` : "absent"}
+          st={L.accel} />
         <SysNode x={46}   y={556} title="LIGHT KNOB"    st={L.espnow} />
         <SysNode x={336}  y={556} w={260} title="LIGHT ESP32"
           sub={st.illumOnline ? ageText(st.illumAge) : "offline"} st={L.light} />
@@ -557,6 +567,10 @@ export default function HVACDashboard() {
   const [tsdashInit, setTsdashInit] = useState(false);
   const [tsdashUsb, setTsdashUsb] = useState(false);
   const [uptime, setUptime] = useState(0);
+  const [accelOk, setAccelOk] = useState(false);
+  const [gLat, setGLat] = useState(0);
+  const [gLon, setGLon] = useState(0);
+  const [accelBad, setAccelBad] = useState("");
   const [idriveDetents, setIdriveDetents] = useState(0);
   const [idriveAction, setIdriveAction] = useState("");
   const [idriveActive, setIdriveActive] = useState(false);
@@ -637,6 +651,10 @@ export default function HVACDashboard() {
           apply("tsdash_init", setTsdashInit);
           apply("tsdash_usb", setTsdashUsb);
           apply("uptime_s", setUptime);
+          apply("accel_ok", setAccelOk);
+          apply("g_lateral", setGLat);
+          apply("g_longitudinal", setGLon);
+          apply("accel_axes_bad", setAccelBad);
         } catch (e) { /* ignore */ }
       };
       ws.onclose = () => {
@@ -812,6 +830,7 @@ export default function HVACDashboard() {
               illumOnline, illumAge,
               tsdashOnline, tsdashAge, tsdashInit, tsdashUsb,
               onewireOk, adsOk, wsConnected, uptime,
+              accelOk, accelBad, gLat, gLon,
               mixFault: mixFlapFault, defFault: defrostFlapFault, footFault: footFlapFault,
             }}
           />
