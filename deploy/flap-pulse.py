@@ -39,11 +39,24 @@ import sys
 import time
 
 # ── H-bridge pins (BCM), matching hvac_backend.py ────────────────
+# lo/hi are the measured end stops, 2026-08-02, taken with `sweep` at gain
+# 2/3. "up" names the input that drives the pot UP in mV — note blend is
+# wired opposite to the other two, which is why there is a column for it
+# rather than one global rule.
 FLAPS = {
-    "blend":    {"in1": 23, "in2": 24, "ch": 0, "note": "in1=COLD, in2=HOT"},
-    "defrost":  {"in1": 16, "in2": 20, "ch": 1, "note": ""},
-    "footwell": {"in1": 12, "in2": 21, "ch": 2, "note": ""},
+    "blend":    {"in1": 23, "in2": 24, "ch": 0, "lo": 120, "hi": 4908,
+                 "up": "in1", "note": "in1=COLD, in2=HOT"},
+    "defrost":  {"in1": 16, "in2": 20, "ch": 1, "lo": 357, "hi": 5031,
+                 "up": "in2", "note": ""},
+    "footwell": {"in1": 12, "in2": 21, "ch": 2, "lo": 198, "hi": 5016,
+                 "up": "in2", "note": ""},
 }
+
+
+def pct_of_travel(name, mv):
+    """Where this flap sits between its OWN measured end stops."""
+    f = FLAPS[name]
+    return (mv - f["lo"]) / (f["hi"] - f["lo"]) * 100.0
 
 # ── Safety envelope ──────────────────────────────────────────────
 PULSE_MS_DEFAULT = 120     # motor on-time per pulse
@@ -157,8 +170,12 @@ def cmd_check(args, chans):
         verdict = assess(mv)
         if verdict != "plausible":
             ok = False
-        note = f"  ({f['note']})" if f["note"] else ""
-        print(f"  {name:9} A{f['ch']}  {mv:7.1f} mV  spread {spread:5.1f}  {verdict}{note}")
+        pct = pct_of_travel(name, mv)
+        bar = "#" * int(round(max(0, min(100, pct)) / 5)).__int__()
+        print(f"  {name:9} A{f['ch']}  {mv:7.1f} mV  {pct:6.1f}% of travel  "
+              f"|{bar:<20}|  {verdict}")
+        if f["note"]:
+            print(f"            {f['note']}")
     print()
     if ok:
         print("  All three read like connected pots. A sweep is safe to attempt.")

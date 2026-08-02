@@ -110,8 +110,28 @@ ADS_DEF_CHANNEL    = 1   # P1 — defroster flap feedback
 ADS_FOOT_CHANNEL   = 2   # P2 — footwell flap feedback
 
 # --- Analog Scaling ---
+# Kept for anything still referencing them; the flaps use FLAP_CAL below.
 ADC_MV_MIN = 225     # mV at 0% position
 ADC_MV_MAX = 4090    # mV at 100% position
+
+# --- Per-flap feedback calibration -------------------------------
+# Measured end stop to end stop with deploy/flap-pulse.py on 2026-08-02,
+# at ADC gain 2/3. One global pair could never have worked: the three
+# spans differ by hundreds of mV, and the old 225/4090 stopped a full
+# volt short of the real top, so the last fifth of travel reported 100%
+# before the flap got there.
+#
+# lo/hi are held 60 mV INSIDE each measured stop so the PID settles just
+# short of the mechanical limit instead of leaning on it.
+#
+# invert=True means the pot runs backwards relative to the sense we want
+# to publish. Blend is the case: GPIO24 is the HOT drive and it moves the
+# pot DOWN, so raw-low is hot — and the control logic wants 100% = hot.
+FLAP_CAL = {
+    ADS_MIX_CHANNEL:  {"lo":  180, "hi": 4848, "invert": True},   # blend
+    ADS_DEF_CHANNEL:  {"lo":  417, "hi": 4971, "invert": False},  # defrost
+    ADS_FOOT_CHANNEL: {"lo":  258, "hi": 4956, "invert": False},  # footwell
+}
 
 # --- Accelerometer: ADXL335 on a second ADS1115 -------------------
 # Mounted flat and square to the car (docs/ACCELEROMETER_WIRING.md §4):
@@ -590,13 +610,24 @@ class HardwareManager:
 
     def drive_mix_flap(self, command: float):
         """Positive = toward HOT, negative = toward COLD."""
+        # Left as-is, and that is deliberate. Blend is wired opposite to the
+        # other two: GPIO23 raises its pot where GPIO16/GPIO12 lower theirs.
+        # Combined with invert=True in FLAP_CAL, driving HOT already raises
+        # the published position. A blanket polarity fix would have broken
+        # exactly this one flap.
         self.drive_hbridge(PIN_MIX_HOT, PIN_MIX_COLD, command)
 
     def drive_defrost_flap(self, command: float):
-        self.drive_hbridge(PIN_DEF_IN1, PIN_DEF_IN2, command)
+        # Measured 2026-08-02: IN2 (GPIO20) drives this pot UP. Positive
+        # command means "position must increase", so IN2 is the forward pin.
+        # It was the other way round, which is why the defrost flap ran to
+        # the wrong stop and sat there until the watchdog cut it.
+        self.drive_hbridge(PIN_DEF_IN2, PIN_DEF_IN1, command)
 
     def drive_footwell_flap(self, command: float):
-        self.drive_hbridge(PIN_FOOT_IN1, PIN_FOOT_IN2, command)
+        # Measured 2026-08-02: IN2 (GPIO21) drives this pot UP. Same
+        # inversion the defrost flap had.
+        self.drive_hbridge(PIN_FOOT_IN2, PIN_FOOT_IN1, command)
 
     # ── Sensor Reading ─────────────────────────────────────────
     def read_flap_position(self, channel: int) -> float:
@@ -614,7 +645,10 @@ class HardwareManager:
 
         try:
             mv = self._ads_channels[channel].voltage * 1000  # Convert V to mV
-            pct = (mv - ADC_MV_MIN) / (ADC_MV_MAX - ADC_MV_MIN) * 100
+            cal = FLAP_CAL[channel]
+            pct = (mv - cal["lo"]) / (cal["hi"] - cal["lo"]) * 100
+            if cal["invert"]:
+                pct = 100.0 - pct
             return max(0.0, min(100.0, pct))
         except Exception as e:
             log.error("ADS read CH%d failed: %s", channel, e)
