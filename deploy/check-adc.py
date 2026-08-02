@@ -46,7 +46,8 @@ def open_ads(addr):
     i2c = busio.I2C(board.SCL, board.SDA)
     try:
         ads = ADS.ADS1115(i2c, address=addr)
-        ads.gain = 1
+        # 5 V pot excitation needs ±6.144 V; the ADXL335 on 3.3 V does not.
+        ads.gain = (2 / 3) if addr == FLAP_ADDR else 1
         chans = {ch: AnalogIn(ads, ch) for ch in range(4)}
         for ch in chans:                      # prime the mux
             chans[ch].voltage
@@ -77,6 +78,8 @@ def verdict_flap(mv_list):
     lo, hi = min(mv_list), max(mv_list)
     spread, mean = hi - lo, sum(mv_list) / len(mv_list)
     pct = (mean - POT_0PCT_MV) / (POT_100PCT_MV - POT_0PCT_MV) * 100
+    if mean > 4090 and spread < 2:
+        return "PEGGED at full scale — ADC clipping, real voltage is higher"
     if spread > 150:
         return f"UNSTABLE (±{spread:.0f} mV) — floating input, or two chips on one address"
     if mean < POT_0PCT_MV * 0.6:

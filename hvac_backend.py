@@ -444,7 +444,12 @@ class HardwareManager:
         try:
             i2c = busio.I2C(board.SCL, board.SDA)
             ads = ADS.ADS1115(i2c, address=ADS_I2C_ADDR)
-            ads.gain = 1  # ±4.096V range
+            # ±6.144 V full scale, NOT ±4.096. The pot dividers are excited at ~5 V, so
+            # the top of flap travel sits above the ±4.096 V range gain=1 gives —
+            # it clipped at exactly 4095.9 mV with zero spread, which reads as a
+            # confident "100%" while hiding how much travel is left. Resolution
+            # drops to 187.5 uV/bit, which is irrelevant against a 5 V span.
+            ads.gain = 2 / 3
             self._ads_channels = {
                 ADS_MIX_CHANNEL:  AnalogIn(ads, 0),
                 ADS_DEF_CHANNEL:  AnalogIn(ads, 1),
@@ -460,7 +465,8 @@ class HardwareManager:
         try:
             i2c = busio.I2C(board.SCL, board.SDA)
             ads = ADS.ADS1115(i2c, address=ACCEL_I2C_ADDR)
-            ads.gain = 1  # ±4.096 V, same as the flap ADC
+            ads.gain = 1  # ±4.096 V — ADXL335 runs on 3.3 V, so this fits
+                          # and gives finer resolution than the flap ADC's 2/3
             self._accel_channels = {
                 name: AnalogIn(ads, ch) for name, ch in ACCEL_CH.items()
             }
