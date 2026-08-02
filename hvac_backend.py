@@ -199,7 +199,28 @@ ACCEL_INVERT_Y = False
 FLAP_PID_KP = 2.0    # Proportional gain
 FLAP_PID_KI = 0.5    # Integral gain
 FLAP_PID_KD = 0.1    # Derivative gain
-FLAP_DEADBAND = 2.0  # % — don't drive motor within this band of setpoint
+# Settling band, WITH HYSTERESIS. The old single 2% deadband had none: stop
+# at 2, start at 2. A flap that parks just under the edge — measured wandering
+# 1.14 to 1.66% — crosses it on any drift and kicks the motor, over and over.
+# That is the chatter, and it is not a tuning problem you can gain your way
+# out of, because drive_hbridge() is bang-bang: there is no PWM on these pins,
+# so ANY non-zero command is full motor power. The PID's carefully scaled
+# magnitude is discarded and only its sign survives.
+#
+# So: stop when close, and refuse to start again until the error is large
+# enough to be worth a motor movement. These are air flaps — a few percent of
+# travel is not perceptible, and every avoided kick is motor life.
+#
+# The blend flap gets a tighter pair than the diverters because it is the
+# temperature element, driven by an outer PID that moves its target
+# continuously. The diverters only ever move in 25% button steps, so a 10%
+# re-engage threshold there can never block a real command.
+FLAP_SETTLE = {
+    "mix":  {"stop": 3.0, "start":  7.0},
+    "def":  {"stop": 4.0, "start": 10.0},
+    "foot": {"stop": 4.0, "start": 10.0},
+}
+FLAP_DEADBAND = 0.0  # owned by FLAP_SETTLE now — one rule, one place
 # Flap overdrive protection: if a flap is driven this long without its feedback
 # advancing at least FLAP_PROGRESS_EPS, cut the motor — stall, end-stop, or lost
 # feedback. Set from the measured full-travel time + margin (bench test).
@@ -758,6 +779,8 @@ class HVACController:
         self.state = HVACState()
         self._start_time = time.monotonic()
         self._load_state()
+        # Which flaps are currently parked. See _settle_flap().
+        self._flap_settled = {"mix": False, "def": False, "foot": False}
 
         # Flap position PIDs
         self.mix_pid = PIDController(
@@ -898,6 +921,27 @@ class HVACController:
                 tsdash_send("D " + move.upper())
         # Persist user settings after every command
         self._save_state()
+
+    def _settle_flap(self, name, cmd, target, pos, pid):
+        """Hysteresis latch: hold a settled flap still until it is properly off.
+
+        Returns the command actually worth applying. Resetting the PID on
+        settle matters as much as the band does — otherwise the integral
+        keeps winding while the motor is off, and the next legitimate move
+        starts with a wound-up term that drives straight past the target.
+        """
+        band = FLAP_SETTLE[name]
+        err = abs(target - pos)
+        if self._flap_settled[name]:
+            if err <= band["start"]:
+                pid.reset()
+                return 0.0
+            self._flap_settled[name] = False        # genuinely moved away
+        elif err <= band["stop"]:
+            self._flap_settled[name] = True
+            pid.reset()
+            return 0.0
+        return cmd
 
     # ── Vent distribution ─────────────────────────────────────────
     def _publish_vent(self, defrost, foot):
@@ -1189,6 +1233,15 @@ class HVACController:
             mix_cmd = self.mix_pid.update(self.state.mix_flap_target, self.state.mix_flap_pos)
             def_cmd = self.def_pid.update(self.state.defrost_flap_target, self.state.defrost_flap_pos)
             foot_cmd = self.foot_pid.update(self.state.footwell_flap_target, self.state.footwell_flap_pos)
+            # Settle first, stall-guard second: a flap held still by the
+            # hysteresis latch is not "driven without progress", and feeding
+            # it to the watchdog would eventually latch a false fault.
+            mix_cmd = self._settle_flap("mix", mix_cmd,
+                self.state.mix_flap_target, self.state.mix_flap_pos, self.mix_pid)
+            def_cmd = self._settle_flap("def", def_cmd,
+                self.state.defrost_flap_target, self.state.defrost_flap_pos, self.def_pid)
+            foot_cmd = self._settle_flap("foot", foot_cmd,
+                self.state.footwell_flap_target, self.state.footwell_flap_pos, self.foot_pid)
             # Overdrive / stall protection — cut a motor that isn't making progress
             mix_cmd = self._guard_flap("mix", mix_cmd, self.state.mix_flap_pos, now)
             def_cmd = self._guard_flap("def", def_cmd, self.state.defrost_flap_pos, now)
