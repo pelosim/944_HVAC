@@ -852,6 +852,19 @@ mac   which board this is; udev cannot pin it, so it says so itself</pre>
     </table>
   </div>
   <div class="note">
+    <p><strong>The pot lives inside the actuator, and that has two consequences.</strong>
+    It measures actuator shaft travel, so the end stops it reads are the actuator's own —
+    which is why <code>flap-pulse.py sweep</code> is safe to run and why its numbers are
+    repeatable: nothing can be driven past a stop the feedback is mechanically part of,
+    and the calibration survives any work on the door or its linkage without a re-sweep.</p>
+    <p>The flip side is that position is <em>actuator</em> position, never <em>door</em>
+    position. A broken retainer or a detached linkage leaves the feedback reading
+    confidently and correctly while the door does not move at all. Nothing in software
+    can see that — it is one of the few faults in this system that only a hand on the
+    flap will find.</p>
+  </div>
+
+  <div class="note">
     <p><strong>Pot excitation is now your job.</strong> The factory control head fed
     these dividers; the Pi must. Your scaling constants — 225 mV at 0%, 4090 mV at 100% —
     imply roughly 5 V across the element, so the ADS1115 needs to be on 5 V too. On 3.3 V

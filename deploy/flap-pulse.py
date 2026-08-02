@@ -25,6 +25,11 @@ the flap has hit its travel limit and the motor is now stalled, which is
 exactly the condition that burns it. Three consecutive pulses with no
 measurable movement ends the run.
 
+The pot is inside the actuator, so those stops are the actuator's own and
+the numbers a sweep produces are repeatable: they do not shift if the door
+or its linkage is worked on. The same fact means position is ACTUATOR
+position, not DOOR position — a detached linkage reads perfectly normal.
+
 BEFORE THE FIRST RUN, with the connector unplugged, ohm each pot: end to end
 should read a few kOhm, and wiper to end should sweep smoothly as the flap is
 moved by hand. Pins 4 and 5 are the motor; 1, 2 and 3 are the pot, wiper on
