@@ -162,8 +162,8 @@ footer{margin-top:56px;padding-top:20px;border-top:1px solid var(--line);
   <code>hvac_backend.py</code>, <code>idrive_controller.ino</code>, and
   <code>pwm_controller.ino</code>.</p>
   <div class="stamp">
-    <span>7 modules</span>
-    <span>5 ESP32s on the Pi USB hub</span>
+    <span>8 modules</span>
+    <span>6 ESP32s on the Pi USB hub</span>
     <span>generated 2026-07-31</span>
   </div>
 </header>
@@ -493,6 +493,8 @@ graph LR
             <td class="mono">—</td><td>console + flashing; no Pi protocol yet</td></tr>
         <tr><td class="mono">/dev/gauges2</td><td class="mono">ttyACM3</td><td>Gauge panel B (slave)</td>
             <td class="mono">—</td><td>named only — no firmware assembled</td></tr>
+        <tr><td class="mono">/dev/ignition</td><td class="mono">ttyACM0</td><td>ACC/IGN display</td>
+            <td class="mono">115200</td><td>console + flashing; no Pi protocol</td></tr>
         <tr><td class="mono">/dev/tsdash</td><td class="mono">tty<b>USB</b>0</td><td>Dash bridge</td>
             <td class="mono">115200</td><td>CH340, not the ESP — pinned by hub PORT</td></tr>
       </tbody>
@@ -776,6 +778,14 @@ mac   which board this is; udev cannot pin it, so it says so itself</pre>
             and nothing enumerated it. An earlier build inferred this from USB events
             and read 0 in every state — a broken indicator is worse than none, because
             you debug the wrong half.</td></tr>
+        <tr><td>Flashing the ignition display flashes the smartknob instead, or vice
+            versa</td>
+            <td>Both are ESP32-S3 boards that enumerate as the same
+            <code>303a:1001</code> with the same product string, so there is nothing in
+            the descriptor to tell them apart except the MAC. The udev rule pinning
+            <code>/dev/ignition</code> to <code>48:CA:43:A3:FD:8C</code> is the only
+            thing separating them — never flash a bare <code>ttyACM</code>. Confirm with
+            <code>ls -l /dev/ignition</code> first.</td></tr>
         <tr><td>The bridge never appears as <code>/dev/tsdash</code>, and the HVAC Pi
             grows a keyboard it did not have</td>
             <td><b>The two USB-C cables are swapped at the bridge.</b> The native (HID)
@@ -987,6 +997,11 @@ mac   which board this is; udev cannot pin it, so it says so itself</pre>
             <td class="mono">/dev/gauges2</td>
             <td class="mono">core 2.0.14</td>
             <td class="mono">none yet</td></tr>
+        <tr><td><b>Ignition display</b><br/><span class="mono">Waveshare S3-LCD-1.47</span></td>
+            <td class="mono">48:CA:43:A3:FD:8C</td>
+            <td class="mono">/dev/ignition</td>
+            <td class="mono">core 3.3.10</td>
+            <td class="mono">ignition_status_display</td></tr>
         <tr><td><b>Dash bridge</b><br/><span class="mono">Lonely Binary N16R8</span></td>
             <td class="mono">3C:DC:75:40:0B:D8<br/>USB serial 3CDC75400BD8</td>
             <td class="mono">/dev/tsdash<br/>(hub port 1-1.4)</td>
@@ -1001,6 +1016,11 @@ mac   which board this is; udev cannot pin it, so it says so itself</pre>
     </table>
   </div>
   <div class="note">
+    <p><strong>ttyACM numbering reshuffled again</strong> when the ignition display
+    was added on 2026-08-03: <code>/dev/lighting</code> moved from ttyACM0 to ttyACM4,
+    and the new board took ttyACM0. Nothing broke, because every board is reached
+    through its symlink and never through a number — which is the entire reason the
+    symlinks exist. Any note anywhere that names a raw ttyACM is already stale.</p>
     <p><strong>Two separate batch collisions live in this table.</strong> The gauge
     panels are <code>…19:9C</code> and <code>…18:D4</code>; the lighting board and the
     dash bridge are <code>…0B:F0</code> and <code>…0B:D8</code>. Only the full serial
