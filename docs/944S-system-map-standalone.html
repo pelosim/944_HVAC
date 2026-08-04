@@ -303,6 +303,21 @@ serial link.</desc>
     panels and the ACC/IGN ignition display are separate projects with no link to
     this system yet. The iDrive's <code>GAUGE</code> mode is reserved for the gauge
     panels but currently emits actions nothing consumes.</p>
+    <div class="note stop" style="margin-top:14px">
+      <p><strong>Open follow-up: enable SSH on the TSDash Pi.</strong> It is the only
+      machine in the car with no recovery path. The backup kit in
+      <code>944S-PiDash-Backup</code> holds the <code>.tsproj</code>, the project config
+      and the dash generator, but it cannot reach the SD image or the TSDash app's own
+      configuration over VNC — so if that card dies, the dash comes back only by being
+      rebuilt by hand.</p>
+      <p>It would also make the Pi deployable the way <code>pi944</code> is, instead of
+      being hand-driven through a VNC session. Turning it on needs someone at that
+      console: <code>raspi-config</code> &rarr; Interface Options &rarr; SSH, or
+      <code>sudo systemctl enable --now ssh</code>, then an alias and a key.</p>
+      <p>Nothing is blocked on it. The dash bridge was built specifically so that Pi
+      needs nothing installed on it, and that stays true either way.</p>
+    </div>
+
     <p><strong>The TSDash Pi is a second Pi, not a screen on this one.</strong> It runs
     TSDash Echo against the MS3-Pro EVO on its own FTDI serial link, has only VNC open
     (no SSH), and is not networked to the HVAC Pi in the car. That isolation is why the
@@ -374,7 +389,7 @@ serial link.</desc>
         <dt>MAC</dt><dd>2C:CF:67:7E:D7:D7</dd>
         <dt>App</dt><dd>TSDash Echo · 3-seat licence</dd>
         <dt>ECU</dt><dd>MS3-Pro EVO · FTDI AQ03DW41<br/>ttyUSB0 115200 8N1</dd>
-        <dt>Access</dt><dd>VNC 5900 only &mdash; no SSH</dd>
+        <dt>Access</dt><dd>VNC 5900 only &mdash; no SSH<br/><b>follow-up: enable it</b></dd>
         <dt>Repo</dt><dd>pelosim/944S-PiDash-Backup</dd>
       </dl>
     </div>
