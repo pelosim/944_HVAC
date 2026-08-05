@@ -242,6 +242,14 @@ CONTROL_HZ = 10       # Main loop frequency
 SENSOR_HZ  = 2        # Temp sensor read frequency
 IDRIVE_ACTIVE_S = 4.0 # iDrive knob mirror stays "live" this long after input
 
+# How often the 1-Wire bus is re-scanned for DS18B20s. Discovery used to run
+# only at startup, so any sensor that dropped off the bus — loose connector,
+# brownout, a marginal pull-up — stayed gone until someone restarted the
+# service, and a single bad connection looked like total loss of climate
+# sensing. The scan is a directory listing of /sys/bus/w1/devices; it does not
+# drive the bus itself, so it is cheap and safe to repeat.
+TEMP_RESCAN_S = 10.0
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Detect platform — use stubs if not on a Pi
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -582,20 +590,49 @@ class HardwareManager:
             return {"g": {"x": 0.0, "y": 0.0, "z": 1.0}, "bad": [], "ref_mv": 0.0}
         return self._accel_cache
 
-    def _init_temps(self):
+    def _scan_temps(self):
+        """(Re)discover DS18B20s on the 1-Wire bus. Safe to call repeatedly.
+
+        Only ever called from the temp reader thread (or from __init__ before
+        that thread starts), so the dict swap below needs no lock.
+        """
         try:
-            for sensor in W1ThermSensor.get_available_sensors():
-                self._temp_sensors[sensor.id] = sensor
-                log.info("Found DS18B20: %s", sensor.id)
+            found = {s.id: s for s in W1ThermSensor.get_available_sensors()}
         except NoSensorFoundError:
-            log.warning("No DS18B20 sensors found")
+            found = {}
         except Exception as e:
-            log.error("1-Wire init failed: %s", e)
+            log.error("1-Wire scan failed: %s", e)
+            return          # keep whatever we already had
+
+        for sid in found:
+            if sid not in self._temp_sensors:
+                log.info("DS18B20 appeared: %s", sid)
+        for sid in self._temp_sensors:
+            if sid not in found:
+                # Drop the cached reading too — a temperature that stopped
+                # updating is worse than no temperature, because the control
+                # loop would keep trusting it.
+                log.warning("DS18B20 vanished: %s", sid)
+                self._temp_cache.pop(sid, None)
+
+        self._temp_sensors = found
+
+    def _init_temps(self):
+        self._scan_temps()
+        if not self._temp_sensors:
+            log.warning("No DS18B20 sensors found — will keep re-scanning "
+                        "every %.0fs", TEMP_RESCAN_S)
 
     def _temp_reader_loop(self):
         """Daemon thread: continuously read the (slow, blocking) DS18B20s and
-        cache the results so the async control loop never blocks on 1-Wire."""
+        cache the results so the async control loop never blocks on 1-Wire.
+        Also re-scans the bus periodically so sensors that appear or drop out
+        are picked up without restarting the service."""
+        last_scan = time.monotonic()
         while True:
+            if time.monotonic() - last_scan >= TEMP_RESCAN_S:
+                last_scan = time.monotonic()
+                self._scan_temps()
             for sid, sensor in list(self._temp_sensors.items()):
                 try:
                     c = sensor.get_temperature()
