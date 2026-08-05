@@ -1,0 +1,28 @@
+# 944S boot splash.
+#
+# One image, scaled to FIT — never cropped, never stretched off its aspect
+# ratio — and centred on black. Deliberately static: an animation here would
+# only draw attention to how long boot takes, and this screen exists to hide
+# exactly that.
+#
+# Plymouth's script language has no min(), hence the explicit compare.
+
+Window.SetBackgroundTopColor(0, 0, 0);
+Window.SetBackgroundBottomColor(0, 0, 0);
+
+sw = Window.GetWidth();
+sh = Window.GetHeight();
+
+img = Image("splash.png");
+iw  = img.GetWidth();
+ih  = img.GetHeight();
+
+sx = sw / iw;
+sy = sh / ih;
+if (sx < sy) { s = sx; } else { s = sy; }
+
+scaled = img.Scale(iw * s, ih * s);
+sprite = Sprite(scaled);
+sprite.SetX((sw - iw * s) / 2);
+sprite.SetY((sh - ih * s) / 2);
+sprite.SetZ(0);

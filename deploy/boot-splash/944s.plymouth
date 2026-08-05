@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=944S
+Description=944S boot splash — one still image, centred, on black
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/944s
+ScriptFile=/usr/share/plymouth/themes/944s/944s.script
