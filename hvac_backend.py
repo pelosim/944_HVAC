@@ -157,7 +157,17 @@ DEFROST_FRESH_AIR_PCT = 75
 # to publish. Blend is the case: GPIO24 is the HOT drive and it moves the
 # pot DOWN, so raw-low is hot — and the control logic wants 100% = hot.
 FLAP_CAL = {
-    ADS_MIX_CHANNEL:  {"lo":  180, "hi": 4848, "invert": True},   # blend
+    # Blend re-measured 2026-08-04 with the door on a TEMPORARY LINKAGE, using
+    # flap-pulse.py --gentle, which stops at the onset of binding instead of
+    # driving into a stop. Travel ran 173-4853 mV; the previous 180/4848 came
+    # from the actuator running FREE with a broken retainer, and would have
+    # pushed roughly 115 mV past the binding point at BOTH ends every time
+    # something commanded full travel.
+    #
+    # Held 120 mV inside each end rather than the usual 60 — twice the margin,
+    # because the thing being protected is temporary. Narrow this back when the
+    # permanent linkage goes in and a fresh sweep says it is safe.
+    ADS_MIX_CHANNEL:  {"lo":  293, "hi": 4733, "invert": True},   # blend
     # Both confirmed against the physical flaps on 2026-08-02: defrost read
     # 0% while fully OPEN, footwell read 100% while fully CLOSED. Both
     # inverted, so on all three flaps 100% now means "more" — full hot,

@@ -49,8 +49,12 @@ import time
 # wired opposite to the other two, which is why there is a column for it
 # rather than one global rule.
 FLAPS = {
+    # lo/hi stay the ACTUATOR's free range so "% of travel" means the same
+    # thing every time. Blend's DOOR, on its temporary linkage, binds at
+    # 173 mV and reaches 4853 — 108 mV narrower. The backend is calibrated to
+    # the door, not to this.
     "blend":    {"in1": 23, "in2": 24, "ch": 0, "lo": 120, "hi": 4908,
-                 "up": "in1", "note": "in1=COLD, in2=HOT"},
+                 "up": "in1", "note": "in1=COLD, in2=HOT · door binds at 173 mV"},
     "defrost":  {"in1": 16, "in2": 20, "ch": 1, "lo": 357, "hi": 5031,
                  "up": "in2", "note": ""},
     "footwell": {"in1": 12, "in2": 21, "ch": 2, "lo": 198, "hi": 5016,
@@ -73,6 +77,22 @@ MAX_PULSES       = 60      # hard cap per sweep direction
 POT_SANE_LO_MV   = 40      # outside this band the feedback is not a working pot
 POT_SANE_HI_MV   = 5300    # pots run on ~5 V; measured 5046 mV at a top stop
 EDGE_MARGIN_MV   = 60      # stop this far short of a known end stop
+
+# ── Gentle mode, for a flap on a temporary or suspect linkage ────
+# The normal sweep drives until three pulses deliver no travel at all. That
+# means the motor stalls against the stop for up to ~600 ms, which is fine
+# when the pot is inside the actuator and the actuator is what it is pushing
+# against — but NOT fine when a temporary linkage is in the load path.
+#
+# Gentle mode never reaches a stop. It watches travel-per-pulse and stops as
+# soon as a pulse delivers markedly less than the flap has been managing:
+# that is the flap loading up against something, and it happens BEFORE the
+# force gets anywhere near a stall. Shorter pulses too, so there is less
+# energy in each one and the onset is caught finer.
+GENTLE_MS        = 100     # motor on-time per pulse in gentle mode
+GENTLE_FRAC      = 0.35    # a pulse under this fraction of typical travel = binding
+GENTLE_MIN_FREE  = 4       # pulses of free motion needed before judging
+GENTLE_MARGIN_MV = 120     # back off this far from where binding began
 
 _gpio = None
 _claimed = []
@@ -208,6 +228,11 @@ def cmd_pulse(args, chans):
     return 0
 
 
+def _median(v):
+    v = sorted(v)
+    return v[len(v) // 2] if v else 0.0
+
+
 def cmd_sweep(args, chans):
     f = FLAPS[args.flap]
     mv = read_mv(chans, f["ch"])
@@ -215,41 +240,82 @@ def cmd_sweep(args, chans):
         print(f"  refusing: {args.flap} feedback reads {mv:.0f} mV — {assess(mv)}")
         return 1
 
-    print(f"── sweeping {args.flap} ── pulses of {args.ms} ms, "
-          f"stopping after {MAX_STALL_PULSES} with no travel")
+    ms = GENTLE_MS if args.gentle else args.ms
+    if args.gentle:
+        print(f"── GENTLY sweeping {args.flap} ── {ms} ms pulses, stopping at the "
+              f"first sign of binding rather than at a stop")
+        print(f"   (a pulse under {GENTLE_FRAC:.0%} of typical travel ends that "
+              f"direction; nothing is driven into a hard stop)")
+    else:
+        print(f"── sweeping {args.flap} ── pulses of {ms} ms, "
+              f"stopping after {MAX_STALL_PULSES} with no travel")
+    # In gentle mode ONE dead pulse ends the direction. The binding detector
+    # needs GENTLE_MIN_FREE samples before it can judge, so a flap that starts
+    # near a stop would reach that stop before the detector ever engaged — and
+    # then sit on it for three pulses under the normal rule. One is the safe
+    # backstop whether or not the median got established.
+    max_stalls = 1 if args.gentle else MAX_STALL_PULSES
     ends = {}
+    bound = {}
     for direction in ("in1", "in2"):
         stalls = 0
         pulses = 0
+        travels = []
         last = read_mv(chans, f["ch"])
+        bound[direction] = False
         print(f"\n  {direction}: from {last:.0f} mV")
-        while stalls < MAX_STALL_PULSES and pulses < MAX_PULSES:
-            b, a, d = pulse(args.flap, direction, args.ms, chans)
+        while stalls < max_stalls and pulses < MAX_PULSES:
+            b, a, d = pulse(args.flap, direction, ms, chans)
             pulses += 1
             if assess(a) != "plausible":
                 print(f"    {a:7.1f} mV  !! left the sane band — stopping")
                 break
+
+            if args.gentle and len(travels) >= GENTLE_MIN_FREE:
+                typical = _median(travels)
+                if typical > 0 and abs(d) < typical * GENTLE_FRAC:
+                    print(f"    {a:7.1f} mV  ({d:+5.0f})  BINDING — travel fell to "
+                          f"{abs(d)/typical:.0%} of the {typical:.0f} mV it had been "
+                          f"managing. Stopping here, short of any stop.")
+                    bound[direction] = True
+                    last = a
+                    break
+
             if abs(d) < NO_PROGRESS_MV:
                 stalls += 1
-                print(f"    {a:7.1f} mV  ({d:+5.0f})  no travel [{stalls}/{MAX_STALL_PULSES}]")
+                print(f"    {a:7.1f} mV  ({d:+5.0f})  no travel [{stalls}/{max_stalls}]")
             else:
                 stalls = 0
+                travels.append(abs(d))
                 print(f"    {a:7.1f} mV  ({d:+5.0f})")
             last = a
         ends[direction] = last
-        print(f"    end stop for {direction}: {last:.0f} mV after {pulses} pulses")
+        why = "binding began" if bound[direction] else "end stop"
+        print(f"    {why} for {direction}: {last:.0f} mV after {pulses} pulses")
 
     lo_dir = min(ends, key=lambda k: ends[k])
     hi_dir = max(ends, key=lambda k: ends[k])
     lo, hi = ends[lo_dir], ends[hi_dir]
+    margin = GENTLE_MARGIN_MV if args.gentle else EDGE_MARGIN_MV
     print(f"\n── {args.flap} calibration ──")
-    print(f"  {lo_dir} drives DOWN in mV, ends at {lo:.0f} mV")
-    print(f"  {hi_dir} drives UP   in mV, ends at {hi:.0f} mV")
-    print(f"  usable travel: {hi - lo:.0f} mV")
+    print(f"  {lo_dir} drives DOWN in mV, reached {lo:.0f} mV"
+          f"{'  (binding)' if bound.get(lo_dir) else ''}")
+    print(f"  {hi_dir} drives UP   in mV, reached {hi:.0f} mV"
+          f"{'  (binding)' if bound.get(hi_dir) else ''}")
+    print(f"  travel found: {hi - lo:.0f} mV")
+    known = FLAPS[args.flap]
+    print(f"  actuator's own range (free): {known['lo']:.0f} - {known['hi']:.0f} mV"
+          f"  = {known['hi'] - known['lo']:.0f} mV")
+    lost = (known["hi"] - known["lo"]) - (hi - lo)
+    if lost > 150:
+        print(f"  ** the linkage restricts travel by {lost:.0f} mV "
+              f"({lost / (known['hi'] - known['lo']):.0%}) — the DOOR stops before "
+              f"the actuator does. Calibrating to the actuator would drive the")
+        print(f"     linkage into its stops on every full-travel command.")
     if hi - lo < 500:
         print("  !! that is a very small span — feedback may not be tracking the flap")
-    print(f"  suggested limits, {EDGE_MARGIN_MV} mV inside each stop:")
-    print(f"    0% = {lo + EDGE_MARGIN_MV:.0f} mV     100% = {hi - EDGE_MARGIN_MV:.0f} mV")
+    print(f"  suggested limits, {margin} mV inside each end:")
+    print(f"    0% = {lo + margin:.0f} mV     100% = {hi - margin:.0f} mV")
     print("  (backend currently uses one global pair for all three flaps:")
     print("   ADC_MV_MIN=225, ADC_MV_MAX=4090)")
     return 0
@@ -267,6 +333,9 @@ def main():
     s = sub.add_parser("sweep", help="find both end stops and suggest limits")
     s.add_argument("flap", choices=FLAPS)
     s.add_argument("--ms", type=int, default=PULSE_MS_DEFAULT)
+    s.add_argument("--gentle", action="store_true",
+                   help="stop at the onset of binding, never at a stop — use "
+                        "this for a flap on a temporary or suspect linkage")
     args = ap.parse_args()
 
     if getattr(args, "ms", 0) > PULSE_MS_MAX:
