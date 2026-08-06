@@ -24,12 +24,15 @@
 
 LOG="$HOME/hvac/kiosk.log"
 
-# Wait up to 30s for kanshi to have both outputs enabled AND positioned.
-# Position is the tell that kanshi ran — enabled-but-at-0,0 is the state
-# labwc brings them up in before kanshi touches anything.
+# Wait up to 30s for both outputs to be enabled, positioned, and for kanshi
+# to be up. The kanshi check is not redundant: this layout puts the bar at
+# 0,0 and the round panel at 1920,0, which is also what labwc does by itself
+# left-to-right, so geometry alone cannot tell "kanshi ran" from "kanshi has
+# not run yet". Without it the gate would pass instantly on every boot and
+# the race would be back.
 i=0
 while [ "$i" -lt 30 ]; do
-  if wlr-randr 2>/dev/null | awk '
+  if pgrep -x kanshi >/dev/null 2>&1 && wlr-randr 2>/dev/null | awk '
       /^HDMI-A-1/ { o = "1"; next }
       /^HDMI-A-2/ { o = "2"; next }
       /Enabled: yes/ { en[o] = 1 }
