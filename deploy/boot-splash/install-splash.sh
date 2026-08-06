@@ -82,8 +82,10 @@ echo "==> 5. Desktop layer — the same images behind the kiosks"
 # is used rather than wlr-randr because this runs under sudo with no Wayland
 # session to talk to.
 #
-# wallpaper_common=0 is required: with it set to 1 pcmanfm applies one image
-# to every monitor and the crest would land on the bar too.
+# wallpaper_common stays 1. It selects one wallpaper across WORKSPACES, not
+# across monitors — the per-output file is what picks the per-output image.
+# Setting it to 0 sends pcmanfm looking for per-workspace settings that do not
+# exist here and it paints nothing at all, leaving both screens plain black.
 CONNECTED=$(for s in /sys/class/drm/card*-*/status; do
   [ "$(cat "$s" 2>/dev/null)" = connected ] || continue
   d=${s%/status}; basename "$d" | sed 's|^card[0-9]*-||'
@@ -107,7 +109,7 @@ for U in $(ls /home); do
 import sys, pathlib, re
 f, img = pathlib.Path(sys.argv[1]), sys.argv[2]
 want = {
-    "wallpaper": img, "wallpaper_mode": "fit", "wallpaper_common": "0",
+    "wallpaper": img, "wallpaper_mode": "fit", "wallpaper_common": "1",
     "desktop_bg": "#000000", "desktop_fg": "#000000", "desktop_shadow": "#000000",
     "show_documents": "0", "show_trash": "0", "show_mounts": "0",
 }
@@ -191,6 +193,16 @@ EOF
   chown "$U:$U" "$L/environment"
 done
 
+# The user file alone is not enough. labwc reads $XDG_CONFIG_HOME's environment
+# and THEN the one in $XDG_CONFIG_DIRS, and the later assignment wins — so
+# /etc/xdg/labwc/environment's XCURSOR_THEME=PiXflat silently overrode the
+# user's setting and the pointer stayed visible. Set it in both.
+SYSENV=/etc/xdg/labwc/environment
+if [ -f "$SYSENV" ] && ! grep -q '^XCURSOR_THEME=blank' "$SYSENV"; then
+  cp -n "$SYSENV" "$SYSENV.bak-splash"
+  sed -i 's|^XCURSOR_THEME=.*|XCURSOR_THEME=blank|' "$SYSENV"
+fi
+
 echo "==> 7. Panel off — it draws the boot-time notification popups"
 # The "You are now connected to ..." bubbles at the top of the screen come
 # from wf-panel-pi, which /etc/xdg/labwc/autostart starts under lwrespawn.
@@ -210,4 +222,4 @@ echo "    Undo:  sudo plymouth-set-default-theme -R bgrt"
 echo "           sudo cp /boot/firmware/cmdline.txt.bak-splash /boot/firmware/cmdline.txt"
 echo "           sudo cp /boot/firmware/config.txt.bak-splash /boot/firmware/config.txt"
 echo "           sudo cp $SYSAUTO.bak-splash $SYSAUTO"
-echo "           rm ~/.config/labwc/environment   # pointer visible again"
+echo "           sudo cp $SYSENV.bak-splash $SYSENV; rm ~/.config/labwc/environment  # pointer back"
