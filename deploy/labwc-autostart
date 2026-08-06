@@ -1,18 +1,51 @@
 #!/bin/sh
 # labwc session autostart (installed to ~/.config/labwc/autostart).
 #
-# Dual output while the main touchscreen is being replaced:
-#   HDMI-A-1 (round panel)              -> aux.html: clock OR G-meter,
-#                                          switched from the HVAC dashboard
-#   HDMI-A-2 (forced 1920x720, cmdline) -> HVAC dashboard
-# rc.xml window rules pin each kiosk to its output; kanshi lays the two out.
+# Dual output, as loomed in the car:
+#   HDMI-A-1  1920x720 bar (WaveShare, touch)  -> HVAC dashboard
+#   HDMI-A-2  480x480 round (LTM ZL480)        -> aux.html: clock OR G-meter,
+#                                                 switched from the dashboard
+# kanshi lays the two outputs out; rc.xml window rules pin each kiosk to one.
+# Run deploy/setup-displays.sh to write all three configs consistently.
+#
+# WHY THE WAIT BELOW: /etc/xdg/labwc/autostart starts kanshi at the same
+# moment this file starts the kiosks, and labwc evaluates its MoveToOutput
+# rules when a window maps. A Chromium that mapped before kanshi had laid out
+# the outputs got pinned to nothing and stayed wherever it landed — which is
+# why the dashboard and the clock traded screens at random on boot. Waiting
+# for the layout to settle removes the race instead of re-rolling the dice.
 #
 # VNC: the system wayvnc.service serves ONE output at a time on :5900.
 # This WayVNC build double-frees on `output=` config pinning and a second
 # instance can't read the root-only TLS keys, so we don't run a 2nd instance.
 # Switch which screen :5900 shows with:
-#   sudo wayvncctl --socket=/tmp/wayvnc/wayvncctl.sock output-set HDMI-A-1  (clock)
-#   sudo wayvncctl --socket=/tmp/wayvnc/wayvncctl.sock output-set HDMI-A-2  (dashboard)
+#   sudo wayvncctl --socket=/tmp/wayvnc/wayvncctl.sock output-set HDMI-A-1  (dashboard)
+#   sudo wayvncctl --socket=/tmp/wayvnc/wayvncctl.sock output-set HDMI-A-2  (aux)
 
-/home/mark/hvac/deploy/aux-launch.sh &
+LOG="$HOME/hvac/kiosk.log"
+
+# Wait up to 30s for kanshi to have both outputs enabled AND positioned.
+# Position is the tell that kanshi ran — enabled-but-at-0,0 is the state
+# labwc brings them up in before kanshi touches anything.
+i=0
+while [ "$i" -lt 30 ]; do
+  if wlr-randr 2>/dev/null | awk '
+      /^HDMI-A-1/ { o = "1"; next }
+      /^HDMI-A-2/ { o = "2"; next }
+      /Enabled: yes/ { en[o] = 1 }
+      /Position:/   { pos[o] = $2 }
+      END { exit !(en["1"] && en["2"] && pos["1"] == "0,0" && pos["2"] == "1920,0") }
+    '; then
+    break
+  fi
+  i=$((i + 1))
+  sleep 1
+done
+echo "$(date '+%F %T') autostart: outputs settled after ${i}s" >> "$LOG"
+
+# One more beat so labwc has processed the layout change before a window maps.
+sleep 2
+
 /home/mark/hvac/deploy/kiosk-launch.sh &
+sleep 1
+/home/mark/hvac/deploy/aux-launch.sh &

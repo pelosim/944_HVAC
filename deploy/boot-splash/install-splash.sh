@@ -2,7 +2,10 @@
 # ─────────────────────────────────────────────────────────────
 # Install the 944S boot splash on a Raspberry Pi (Bookworm/labwc).
 #
-#   sudo bash install-splash.sh /path/to/splash.png
+#   sudo bash install-splash.sh                  (uses splash.png beside this script)
+#   sudo bash install-splash.sh /path/to/other.png
+#
+# The image should be SQUARE — see make-splash.py for why.
 #
 # Hides every stock boot visual in order:
 #   1. firmware rainbow      disable_splash=1        (config.txt)
@@ -16,11 +19,11 @@
 # that does not come back.
 # ─────────────────────────────────────────────────────────────
 set -euo pipefail
-IMG="${1:-}"
 THEME=/usr/share/plymouth/themes/944s
 HERE="$(cd "$(dirname "$0")" && pwd)"
+IMG="${1:-$HERE/splash.png}"
 
-[ -n "$IMG" ] && [ -f "$IMG" ] || { echo "usage: sudo bash install-splash.sh /path/to/splash.png" >&2; exit 2; }
+[ -f "$IMG" ] || { echo "usage: sudo bash install-splash.sh [/path/to/splash.png]" >&2; exit 2; }
 [ "$(id -u)" = 0 ] || { echo "run with sudo" >&2; exit 2; }
 
 echo "==> 1. Theme files"
@@ -57,6 +60,11 @@ echo "==> 5. Desktop layer — same image behind the kiosk, no panel"
 # The desktop is only visible for the moment between the session starting and
 # Chromium covering it. Painting it with the SAME image makes that handoff
 # invisible rather than trying to win a race against it.
+#
+# wallpaper_mode=fit letterboxes a square image on the 1920x720 bar, and the
+# letterbox is painted in desktop_bg — which ships a light lavender. Setting
+# the image without also blacking out desktop_bg is why the stock background
+# was still showing: two grey bars either side of the splash.
 for U in $(ls /home); do
   D="/home/$U/.config/pcmanfm/LXDE-pi"
   [ -d "$D" ] || continue
@@ -65,9 +73,22 @@ for U in $(ls /home); do
     [ -f "$f" ] || continue
     sed -i "s|^wallpaper=.*|wallpaper=$THEME/splash.png|" "$f"
     sed -i "s|^wallpaper_mode=.*|wallpaper_mode=fit|" "$f"
+    sed -i "s|^desktop_bg=.*|desktop_bg=#000000|" "$f"
+    sed -i "s|^desktop_fg=.*|desktop_fg=#000000|;s|^desktop_shadow=.*|desktop_shadow=#000000|" "$f"
     sed -i "s|^show_documents=.*|show_documents=0|;s|^show_trash=.*|show_trash=0|;s|^show_mounts=.*|show_mounts=0|" "$f"
     chown "$U:$U" "$f"
   done
+
+  # The taskbar is respawned by lwrespawn from /etc/xdg/labwc/autostart, so
+  # killing it just brings it back. Auto-hide is the setting it will honour.
+  PI="/home/$U/.config/wf-panel-pi.ini"
+  if [ -f "$PI" ]; then
+    grep -q '^autohide=' "$PI" && sed -i 's|^autohide=.*|autohide=true|' "$PI" \
+      || sed -i '0,/^\[panel\]/s||[panel]\nautohide=true|' "$PI"
+  else
+    printf '[panel]\nautohide=true\n' > "$PI"
+  fi
+  chown "$U:$U" "$PI"
 done
 
 echo
