@@ -1,28 +1,54 @@
 # 944S boot splash.
 #
-# One image, scaled to FIT — never cropped, never stretched off its aspect
+# Two panels, two different images, drawn in one pass:
+#   wide output (the 1920x720 bar)  -> splash-main.png, the car
+#   square output (the 480x480 round gauge) -> splash-aux.png, the crest
+#
+# Plymouth gives every connected output its own "window", indexed from 0, and
+# Window.GetX/GetY return that window's origin in the shared coordinate space
+# — so sprites are positioned globally and must be offset by the origin, not
+# just centred on the width. Choosing by aspect ratio rather than by index
+# means the images do not swap if the connectors ever do.
+#
+# Each image is scaled to FIT — never cropped, never stretched off its aspect
 # ratio — and centred on black. Deliberately static: an animation here would
 # only draw attention to how long boot takes, and this screen exists to hide
 # exactly that.
-#
-# Plymouth's script language has no min(), hence the explicit compare.
 
 Window.SetBackgroundTopColor(0, 0, 0);
 Window.SetBackgroundBottomColor(0, 0, 0);
 
-sw = Window.GetWidth();
-sh = Window.GetHeight();
+main = Image("splash-main.png");
+aux  = Image("splash-aux.png");
 
-img = Image("splash.png");
-iw  = img.GetWidth();
-ih  = img.GetHeight();
+# Sprites must be kept alive in a variable that outlives the loop, or plymouth
+# collects them and the screen stays black.
+sprites = [];
 
-sx = sw / iw;
-sy = sh / ih;
-if (sx < sy) { s = sx; } else { s = sy; }
+i = 0;
+while (Window.GetWidth(i)) {
+    sw = Window.GetWidth(i);
+    sh = Window.GetHeight(i);
+    ox = Window.GetX(i);
+    oy = Window.GetY(i);
 
-scaled = img.Scale(iw * s, ih * s);
-sprite = Sprite(scaled);
-sprite.SetX((sw - iw * s) / 2);
-sprite.SetY((sh - ih * s) / 2);
-sprite.SetZ(0);
+    # Anything appreciably wider than it is tall is the dash bar.
+    if (sw > sh * 1.5) { img = main; } else { img = aux; }
+
+    iw = img.GetWidth();
+    ih = img.GetHeight();
+
+    # Plymouth's script language has no min(), hence the explicit compare.
+    sx = sw / iw;
+    sy = sh / ih;
+    if (sx < sy) { s = sx; } else { s = sy; }
+
+    scaled = img.Scale(iw * s, ih * s);
+    sprite = Sprite(scaled);
+    sprite.SetX(ox + (sw - iw * s) / 2);
+    sprite.SetY(oy + (sh - ih * s) / 2);
+    sprite.SetZ(0);
+
+    sprites[i] = sprite;
+    i++;
+}

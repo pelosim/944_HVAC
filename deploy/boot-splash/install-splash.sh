@@ -2,35 +2,49 @@
 # ─────────────────────────────────────────────────────────────
 # Install the 944S boot splash on a Raspberry Pi (Bookworm/labwc).
 #
-#   sudo bash install-splash.sh                  (uses splash.png beside this script)
-#   sudo bash install-splash.sh /path/to/other.png
+#   sudo bash install-splash.sh
 #
-# The image should be SQUARE — see make-splash.py for why.
+# Two images, taken from beside this script:
+#   splash-main.png   the car        -> the 1920x720 dash bar   (HDMI-A-1)
+#   splash-aux.png    the crest      -> the 480x480 round gauge (HDMI-A-2)
 #
 # Hides every stock boot visual in order:
 #   1. firmware rainbow      disable_splash=1        (config.txt)
 #   2. kernel logos/cursor   logo.nologo, vt.global_cursor_default=0
-#   3. plymouth splash       this theme, your image
-#   4. desktop flash         wallpaper set to the same image, panel hidden
+#   3. plymouth splash       this theme, both images
+#   4. desktop flash         wallpaper set to the same images per output
+#   5. mouse pointer         a fully transparent Xcursor theme
+#   6. panel + its popups    wf-panel-pi is not started at all
 #
 # Idempotent. Backs up both boot files before touching them — they carry
 # load-bearing settings on this car (disable-bt, the forced video mode, and
 # the deliberate ABSENCE of console=serial0) and a careless edit is a Pi
 # that does not come back.
+#
+# Undo is printed at the end.
 # ─────────────────────────────────────────────────────────────
 set -euo pipefail
 THEME=/usr/share/plymouth/themes/944s
 HERE="$(cd "$(dirname "$0")" && pwd)"
-IMG="${1:-$HERE/splash.png}"
 
-[ -f "$IMG" ] || { echo "usage: sudo bash install-splash.sh [/path/to/splash.png]" >&2; exit 2; }
+# Which image each output gets. Keep in step with deploy/setup-displays.sh.
+OUT_MAIN=HDMI-A-1
+OUT_AUX=HDMI-A-2
+
+IMG_MAIN="$HERE/splash-main.png"
+IMG_AUX="$HERE/splash-aux.png"
+
+[ -f "$IMG_MAIN" ] && [ -f "$IMG_AUX" ] || {
+  echo "missing splash-main.png / splash-aux.png beside this script" >&2; exit 2; }
 [ "$(id -u)" = 0 ] || { echo "run with sudo" >&2; exit 2; }
 
 echo "==> 1. Theme files"
 install -d "$THEME"
 install -m644 "$HERE/944s.plymouth" "$HERE/944s.script" "$THEME/"
-install -m644 "$IMG" "$THEME/splash.png"
-echo "    $(identify -format '%wx%h' "$THEME/splash.png" 2>/dev/null || echo 'image installed')"
+install -m644 "$IMG_MAIN" "$THEME/splash-main.png"
+install -m644 "$IMG_AUX" "$THEME/splash-aux.png"
+# The old single-image theme left this behind; the script no longer reads it.
+rm -f "$THEME/splash.png"
 
 echo "==> 2. Firmware splash off"
 grep -q '^disable_splash=1' /boot/firmware/config.txt || {
@@ -56,15 +70,10 @@ grep -q 'root=' "$CL" || { echo "!! cmdline lost root= — restoring backup" >&2
 echo "==> 4. Make it the default theme and rebuild the initramfs"
 plymouth-set-default-theme 944s -R
 
-echo "==> 5. Desktop layer — same image behind the kiosk, no panel"
+echo "==> 5. Desktop layer — the same images behind the kiosks"
 # The desktop is only visible for the moment between the session starting and
-# Chromium covering it. Painting it with the SAME image makes that handoff
+# Chromium covering it. Painting it with the SAME images makes that handoff
 # invisible rather than trying to win a race against it.
-#
-# wallpaper_mode=fit letterboxes a square image on the 1920x720 bar, and the
-# letterbox is painted in desktop_bg — which ships a light lavender. Setting
-# the image without also blacking out desktop_bg is why the stock background
-# was still showing: two grey bars either side of the splash.
 #
 # pcmanfm keeps ONE config PER OUTPUT — desktop-items-HDMI-A-1.conf and so on
 # — and falls back to the stock wallpaper for any output it has no file for.
@@ -72,6 +81,9 @@ echo "==> 5. Desktop layer — same image behind the kiosk, no panel"
 # fisherman.jpg, so write a file for every connected connector. /sys/class/drm
 # is used rather than wlr-randr because this runs under sudo with no Wayland
 # session to talk to.
+#
+# wallpaper_common=0 is required: with it set to 1 pcmanfm applies one image
+# to every monitor and the crest would land on the bar too.
 CONNECTED=$(for s in /sys/class/drm/card*-*/status; do
   [ "$(cat "$s" 2>/dev/null)" = connected ] || continue
   d=${s%/status}; basename "$d" | sed 's|^card[0-9]*-||'
@@ -81,21 +93,21 @@ echo "    connected outputs: $(echo $CONNECTED)"
 for U in $(ls /home); do
   D="/home/$U/.config/pcmanfm/LXDE-pi"
   [ -d "$D" ] || continue
-  install -d "$D"
 
   for OUT in $CONNECTED; do
+    case "$OUT" in
+      "$OUT_AUX") WP="$THEME/splash-aux.png" ;;
+      *)          WP="$THEME/splash-main.png" ;;
+    esac
     f="$D/desktop-items-$OUT.conf"
     [ -f "$f" ] || printf '[*]\n' > "$f"
-  done
-
-  for f in "$D"/desktop-items-*.conf; do
-    [ -f "$f" ] || continue
-    # Set each key, appending it under [*] when the file does not have it yet.
-    python3 - "$f" "$THEME/splash.png" <<'PY'
+    echo "    $OUT -> $(basename "$WP")"
+    # Set each key by name, appending it under [*] when the file lacks it.
+    python3 - "$f" "$WP" <<'PY'
 import sys, pathlib, re
 f, img = pathlib.Path(sys.argv[1]), sys.argv[2]
 want = {
-    "wallpaper": img, "wallpaper_mode": "fit", "wallpaper_common": "1",
+    "wallpaper": img, "wallpaper_mode": "fit", "wallpaper_common": "0",
     "desktop_bg": "#000000", "desktop_fg": "#000000", "desktop_shadow": "#000000",
     "show_documents": "0", "show_trash": "0", "show_mounts": "0",
 }
@@ -117,21 +129,85 @@ f.write_text("\n".join(lines) + "\n")
 PY
     chown "$U:$U" "$f"
   done
-
-  # The taskbar is respawned by lwrespawn from /etc/xdg/labwc/autostart, so
-  # killing it just brings it back. Auto-hide is the setting it will honour.
-  PI="/home/$U/.config/wf-panel-pi.ini"
-  if [ -f "$PI" ]; then
-    grep -q '^autohide=' "$PI" && sed -i 's|^autohide=.*|autohide=true|' "$PI" \
-      || sed -i '0,/^\[panel\]/s||[panel]\nautohide=true|' "$PI"
-  else
-    printf '[panel]\nautohide=true\n' > "$PI"
-  fi
-  chown "$U:$U" "$PI"
 done
+
+echo "==> 6. Transparent mouse pointer"
+# labwc has no idle-hide for the pointer, and unclutter is X11-only. The way
+# to get rid of it on Wayland is to give every client a cursor theme whose
+# images are a single transparent pixel. This hides the pointer ALWAYS, not
+# just when idle — including over VNC. To get it back:
+#   rm /home/<user>/.config/labwc/environment   (then log out and in)
+CURSORS=/usr/share/icons/blank/cursors
+install -d "$CURSORS"
+python3 - "$CURSORS/left_ptr" <<'PY'
+import struct, sys, pathlib
+# Xcursor file format: a 16-byte header, one 12-byte TOC entry per nominal
+# size, then one image chunk each. Every image here is a single fully
+# transparent ARGB pixel, which is what makes the pointer invisible.
+SIZES = [16, 24, 32, 48, 64]
+IMG_TYPE = 0xFFFD0002
+
+def chunk(nominal):
+    # header, type, subtype, version, width, height, xhot, yhot, delay
+    return struct.pack("<9I", 36, IMG_TYPE, nominal, 1, 1, 1, 0, 0, 0) \
+        + struct.pack("<I", 0x00000000)
+
+header = struct.pack("<4sIII", b"Xcur", 16, 0x00010000, len(SIZES))
+pos = 16 + 12 * len(SIZES)
+toc, body = b"", b""
+for s in SIZES:
+    c = chunk(s)
+    toc += struct.pack("<3I", IMG_TYPE, s, pos)
+    body += c
+    pos += len(c)
+pathlib.Path(sys.argv[1]).write_bytes(header + toc + body)
+PY
+# Clients ask for cursors by many names; anything the theme does not define
+# falls back to the visible default, so alias them all to the blank one.
+for n in default pointer arrow top_left_arrow left_ptr_watch watch wait text \
+         xterm ibeam hand hand1 hand2 pointing_hand crosshair cross tcross \
+         fleur move grabbing progress not-allowed no-drop help question_arrow \
+         sb_h_double_arrow sb_v_double_arrow col-resize row-resize \
+         bottom_right_corner bottom_left_corner top_right_corner \
+         top_left_corner bottom_side top_side left_side right_side; do
+  ln -sf left_ptr "$CURSORS/$n"
+done
+cat > /usr/share/icons/blank/index.theme <<'EOF'
+[Icon Theme]
+Name=blank
+Comment=Fully transparent pointer for the 944S kiosk
+EOF
+
+for U in $(ls /home); do
+  L="/home/$U/.config/labwc"
+  [ -d "$L" ] || continue
+  # labwc parses this file at startup and exports the variables, so the two
+  # kiosks started from its autostart inherit them.
+  cat > "$L/environment" <<'EOF'
+# Written by deploy/boot-splash/install-splash.sh
+XCURSOR_THEME=blank
+XCURSOR_SIZE=24
+EOF
+  chown "$U:$U" "$L/environment"
+done
+
+echo "==> 7. Panel off — it draws the boot-time notification popups"
+# The "You are now connected to ..." bubbles at the top of the screen come
+# from wf-panel-pi, which /etc/xdg/labwc/autostart starts under lwrespawn.
+# There is no notification daemon on this system to disable instead, and
+# killing the panel just makes lwrespawn bring it back — so stop launching it.
+# The panel is dead weight on a kiosk anyway.
+SYSAUTO=/etc/xdg/labwc/autostart
+if grep -q '^[^#].*wf-panel-pi' "$SYSAUTO" 2>/dev/null; then
+  cp -n "$SYSAUTO" "$SYSAUTO.bak-splash"
+  sed -i 's|^\(.*wf-panel-pi.*\)$|# 944S kiosk: panel disabled by install-splash.sh\n#\1|' "$SYSAUTO"
+fi
+pkill -x wf-panel-pi 2>/dev/null || true
 
 echo
 echo "==> Done. Reboot to see it."
 echo "    Undo:  sudo plymouth-set-default-theme -R bgrt"
 echo "           sudo cp /boot/firmware/cmdline.txt.bak-splash /boot/firmware/cmdline.txt"
 echo "           sudo cp /boot/firmware/config.txt.bak-splash /boot/firmware/config.txt"
+echo "           sudo cp $SYSAUTO.bak-splash $SYSAUTO"
+echo "           rm ~/.config/labwc/environment   # pointer visible again"
