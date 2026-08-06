@@ -231,6 +231,20 @@ FLAP_SETTLE = {
     "foot": {"stop": 4.0, "start": 10.0},
 }
 FLAP_DEADBAND = 0.0  # owned by FLAP_SETTLE now — one rule, one place
+
+# ── Flaps the controller must NOT drive ───────────────────────────
+# A deliberate, code-level hold. Not a runtime toggle: re-enabling one of
+# these should be a decision someone makes on purpose, with the reason in
+# front of them, not something a stray command can undo.
+#
+# "mix" (blend) is held from 2026-08-04. Its calibration was taken with the
+# damper set by hand to an ASSUMED mid position, and the actuator was not
+# actually at mid — so every measured millivolt maps to the wrong physical
+# place. The numbers are self-consistent and completely wrong, which is the
+# worst kind: nothing in the data looks off. It also runs on a temporary
+# linkage. Re-sweep with flap-pulse.py --gentle once the proper linkage is
+# fitted and the damper reference is known, then delete it from this set.
+FLAP_HELD = {"mix"}
 # Flap overdrive protection: if a flap is driven this long without its feedback
 # advancing at least FLAP_PROGRESS_EPS, cut the motor — stall, end-stop, or lost
 # feedback. Set from the measured full-travel time + margin (bench test).
@@ -326,6 +340,7 @@ class HVACState:
     footwell_flap_target: float = 0.0
 
     # Flap drive-watchdog faults (stall / end-stop / lost feedback → motor cut)
+    flaps_held: str = ""              # space-separated; see FLAP_HELD
     mix_flap_fault: bool = False
     defrost_flap_fault: bool = False
     footwell_flap_fault: bool = False
@@ -1283,6 +1298,10 @@ class HVACController:
             # Settle first, stall-guard second: a flap held still by the
             # hysteresis latch is not "driven without progress", and feeding
             # it to the watchdog would eventually latch a false fault.
+            # Held flaps: never driven, PID reset so nothing winds up, and
+            # kept OUT of the stall watchdog below — a flap that is being
+            # deliberately not driven is not "driven without progress", and
+            # feeding it there would latch a fault that means nothing.
             mix_cmd = self._settle_flap("mix", mix_cmd,
                 self.state.mix_flap_target, self.state.mix_flap_pos, self.mix_pid)
             def_cmd = self._settle_flap("def", def_cmd,
@@ -1307,6 +1326,28 @@ class HVACController:
         self.state.mix_flap_fault = self._flap_wd["mix"]["fault"]
         self.state.defrost_flap_fault = self._flap_wd["def"]["fault"]
         self.state.footwell_flap_fault = self._flap_wd["foot"]["fault"]
+
+        if "mix" in FLAP_HELD:
+            mix_cmd = 0.0
+            self.mix_pid.reset()
+            self.temp_pid.reset()
+            # Park the target on the actual position. Leaving it at whatever
+            # the temperature PID wanted would show the dashboard a standing
+            # error the controller has no intention of correcting, which reads
+            # as a fault rather than as a decision.
+            self.state.mix_flap_target = self.state.mix_flap_pos
+            self._flap_wd["mix"]["fault"] = False
+        if "def" in FLAP_HELD:
+            def_cmd = 0.0
+            self.def_pid.reset()
+            self.state.defrost_flap_target = self.state.defrost_flap_pos
+            self._flap_wd["def"]["fault"] = False
+        if "foot" in FLAP_HELD:
+            foot_cmd = 0.0
+            self.foot_pid.reset()
+            self.state.footwell_flap_target = self.state.footwell_flap_pos
+            self._flap_wd["foot"]["fault"] = False
+        self.state.flaps_held = " ".join(sorted(FLAP_HELD))
 
         self.hw.drive_mix_flap(mix_cmd)
         self.hw.drive_defrost_flap(def_cmd)

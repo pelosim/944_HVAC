@@ -426,6 +426,9 @@ function SystemStatus({ st, onClose }) {
     uart:   st.idriveOnline ? S_OK : st.idriveAge < 0 ? S_UNK : S_BAD,
     ir:     S_UNK,                                   // write-only, always
     hw:     st.onewireOk && st.adsOk && !flapFault ? S_OK : S_BAD,
+    // A deliberately held flap is neither healthy nor faulted. Green would
+    // claim it is being controlled; red would call a decision a failure.
+    held:   st.flapsHeld ? S_UNK : S_OK,
     panel:  st.wsConnected ? S_OK : S_BAD,           // we are drawing, so it is up
     aux:    S_UNK,                                   // no return path
     light:  st.illumOnline ? S_OK : S_BAD,
@@ -457,6 +460,8 @@ function SystemStatus({ st, onClose }) {
     `axis ${st.accelBad.toUpperCase()} reads as an unconnected pin`]);
   if (L.hw === S_BAD) attention.push([C.red, "HVAC HARDWARE",
     flapFault ? "flap travel fault" : !st.onewireOk ? "1-Wire bus down" : "ADS1115 not answering"]);
+  if (st.flapsHeld) attention.push([C.dim, "FLAP HELD",
+    `${st.flapsHeld.toUpperCase()} not driven — awaiting recalibration`]);
   attention.push([C.dim, "HEAD UNIT - IR", "write-only, no feedback path"]);
   attention.push([C.dim, "MS3 -> TSDASH", "not visible from this Pi"]);
 
@@ -513,7 +518,9 @@ function SystemStatus({ st, onClose }) {
         <SysNode x={336}  y={246} w={260} h={104} title="HVAC Pi"
           sub={`up ${Math.floor(st.uptime / 3600)}h ${Math.floor((st.uptime % 3600) / 60)}m`}
           st={S_OK} />
-        <SysNode x={636}  y={218} title="HVAC HARDWARE" st={L.hw} />
+        <SysNode x={636} y={218} title="HVAC HARDWARE"
+          sub={st.flapsHeld ? `${st.flapsHeld} flap held` : undefined}
+          st={st.flapsHeld ? S_UNK : L.hw} />
         <SysNode x={636}  y={298} title="TOUCHSCREEN"   st={L.panel} />
         <SysNode x={636}  y={378} title="AUX SCREEN"    st={L.aux} />
         <SysNode x={636}  y={490} w={260} title="DASH BRIDGE"
@@ -616,6 +623,7 @@ export default function HVACDashboard() {
   const [tsdashInit, setTsdashInit] = useState(false);
   const [tsdashUsb, setTsdashUsb] = useState(false);
   const [uptime, setUptime] = useState(0);
+  const [flapsHeld, setFlapsHeld] = useState("");
   const [accelOk, setAccelOk] = useState(false);
   const [gLat, setGLat] = useState(0);
   const [gLon, setGLon] = useState(0);
@@ -703,6 +711,7 @@ export default function HVACDashboard() {
           apply("tsdash_init", setTsdashInit);
           apply("tsdash_usb", setTsdashUsb);
           apply("uptime_s", setUptime);
+          apply("flaps_held", setFlapsHeld);
           apply("accel_ok", setAccelOk);
           apply("g_lateral", setGLat);
           apply("g_longitudinal", setGLon);
@@ -885,7 +894,7 @@ export default function HVACDashboard() {
               idriveOnline, idriveAge, idriveAction, idriveMode, idriveActive,
               illumOnline, illumAge,
               tsdashOnline, tsdashAge, tsdashInit, tsdashUsb,
-              onewireOk, adsOk, wsConnected, uptime,
+              onewireOk, adsOk, wsConnected, uptime, flapsHeld,
               accelOk, accelBad, gLat, gLon,
               mixFault: mixFlapFault, defFault: defrostFlapFault, footFault: footFlapFault,
             }}
