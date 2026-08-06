@@ -50,11 +50,12 @@ import time
 # rather than one global rule.
 FLAPS = {
     # lo/hi stay the ACTUATOR's free range so "% of travel" means the same
-    # thing every time. Blend's DOOR, on its temporary linkage, binds at
-    # 173 mV and reaches 4853 — 108 mV narrower. The backend is calibrated to
-    # the door, not to this.
+    # thing every time. Re-confirmed 2026-08-06 with the arm off: 111/4907.
+    # On the PERMANENT linkage the door now reaches 125/4879, within ~14 mV of
+    # those stops — it is no longer what limits travel. (The temporary linkage
+    # it replaced bound at 173/4853.) The backend is calibrated to the door.
     "blend":    {"in1": 23, "in2": 24, "ch": 0, "lo": 120, "hi": 4908,
-                 "up": "in1", "note": "in1=COLD, in2=HOT · door binds at 173 mV"},
+                 "up": "in1", "note": "in1=COLD, in2=HOT (sense UNVERIFIED) · door 125-4879"},
     "defrost":  {"in1": 16, "in2": 20, "ch": 1, "lo": 357, "hi": 5031,
                  "up": "in2", "note": ""},
     "footwell": {"in1": 12, "in2": 21, "ch": 2, "lo": 198, "hi": 5016,

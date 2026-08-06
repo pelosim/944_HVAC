@@ -157,17 +157,26 @@ DEFROST_FRESH_AIR_PCT = 75
 # to publish. Blend is the case: GPIO24 is the HOT drive and it moves the
 # pot DOWN, so raw-low is hot — and the control logic wants 100% = hot.
 FLAP_CAL = {
-    # Blend re-measured 2026-08-04 with the door on a TEMPORARY LINKAGE, using
-    # flap-pulse.py --gentle, which stops at the onset of binding instead of
-    # driving into a stop. Travel ran 173-4853 mV; the previous 180/4848 came
-    # from the actuator running FREE with a broken retainer, and would have
-    # pushed roughly 115 mV past the binding point at BOTH ends every time
-    # something commanded full travel.
+    # Blend re-measured 2026-08-06 on the PERMANENT LINKAGE, flap-pulse.py
+    # --gentle, after setting the door against a known actuator datum. Motion
+    # ended at 125 and 4879 mV (peaking 4896), which is within 14 and 11 mV of
+    # the actuator's OWN free stops measured the same day with the arm off:
+    # 111 and 4907. The door is no longer what limits travel — the linkage
+    # costs 34 mV of 4788, against 108 mV on the temporary one it replaced.
     #
-    # Held 120 mV inside each end rather than the usual 60 — twice the margin,
-    # because the thing being protected is temporary. Narrow this back when the
-    # permanent linkage goes in and a fresh sweep says it is safe.
-    ADS_MIX_CHANNEL:  {"lo":  293, "hi": 4733, "invert": True},   # blend
+    # Back to the usual 60 mV margin. The 120 mV used before was doubled
+    # specifically because the linkage was temporary, and it no longer is.
+    #
+    # DIRECTION IS NOT VERIFIED. invert=True says raw-low (the GPIO24/in2 end,
+    # where the flap now sits) is HOT and publishes as 100%. That follows the
+    # in1=COLD/in2=HOT record in flap-pulse.py, but the door is not visible
+    # with the dash in and could not be confirmed by eye on 2026-08-06. The
+    # span and the linearity are measured and trustworthy; only the SENSE is
+    # inherited. To settle it, run the engine to temperature, command full
+    # heat, and feel the duct: if it blows cold, flip this one flag to False
+    # and nothing else — the limits stay correct either way, because they
+    # describe travel, not direction.
+    ADS_MIX_CHANNEL:  {"lo":  185, "hi": 4819, "invert": True},   # blend
     # Both confirmed against the physical flaps on 2026-08-02: defrost read
     # 0% while fully OPEN, footwell read 100% while fully CLOSED. Both
     # inverted, so on all three flaps 100% now means "more" — full hot,
@@ -237,14 +246,19 @@ FLAP_DEADBAND = 0.0  # owned by FLAP_SETTLE now — one rule, one place
 # these should be a decision someone makes on purpose, with the reason in
 # front of them, not something a stray command can undo.
 #
-# "mix" (blend) is held from 2026-08-04. Its calibration was taken with the
-# damper set by hand to an ASSUMED mid position, and the actuator was not
-# actually at mid — so every measured millivolt maps to the wrong physical
-# place. The numbers are self-consistent and completely wrong, which is the
-# worst kind: nothing in the data looks off. It also runs on a temporary
-# linkage. Re-sweep with flap-pulse.py --gentle once the proper linkage is
-# fitted and the damper reference is known, then delete it from this set.
-FLAP_HELD = {"mix"}
+# "mix" (blend) was held 2026-08-04 → 2026-08-06. Both conditions that hold
+# named have now been met: the permanent linkage is fitted, and the damper
+# reference is no longer assumed — the door was set against a measured
+# actuator hard stop rather than an eyeballed mid position, which is the
+# error that made the old millivolts self-consistent and completely wrong.
+#
+# What is still unverified is DIRECTION, not position: see the invert note on
+# ADS_MIX_CHANNEL. That is deliberately not a reason to keep holding. A wrong
+# invert is self-limiting — the loop drives to one end, FLAP_MAX_DRIVE_S cuts
+# the motor after 8 s of no progress, and the result is wrong-temperature air,
+# not a damaged actuator. Holding the flap instead would make the very test
+# that settles the question impossible to run.
+FLAP_HELD = set()
 # Flap overdrive protection: if a flap is driven this long without its feedback
 # advancing at least FLAP_PROGRESS_EPS, cut the motor — stall, end-stop, or lost
 # feedback. Set from the measured full-travel time + margin (bench test).
