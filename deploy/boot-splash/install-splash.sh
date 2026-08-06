@@ -65,17 +65,56 @@ echo "==> 5. Desktop layer — same image behind the kiosk, no panel"
 # letterbox is painted in desktop_bg — which ships a light lavender. Setting
 # the image without also blacking out desktop_bg is why the stock background
 # was still showing: two grey bars either side of the splash.
+#
+# pcmanfm keeps ONE config PER OUTPUT — desktop-items-HDMI-A-1.conf and so on
+# — and falls back to the stock wallpaper for any output it has no file for.
+# Patching only the files that already exist leaves the second screen showing
+# fisherman.jpg, so write a file for every connected connector. /sys/class/drm
+# is used rather than wlr-randr because this runs under sudo with no Wayland
+# session to talk to.
+CONNECTED=$(for s in /sys/class/drm/card*-*/status; do
+  [ "$(cat "$s" 2>/dev/null)" = connected ] || continue
+  d=${s%/status}; basename "$d" | sed 's|^card[0-9]*-||'
+done | sort -u)
+echo "    connected outputs: $(echo $CONNECTED)"
+
 for U in $(ls /home); do
   D="/home/$U/.config/pcmanfm/LXDE-pi"
   [ -d "$D" ] || continue
   install -d "$D"
+
+  for OUT in $CONNECTED; do
+    f="$D/desktop-items-$OUT.conf"
+    [ -f "$f" ] || printf '[*]\n' > "$f"
+  done
+
   for f in "$D"/desktop-items-*.conf; do
     [ -f "$f" ] || continue
-    sed -i "s|^wallpaper=.*|wallpaper=$THEME/splash.png|" "$f"
-    sed -i "s|^wallpaper_mode=.*|wallpaper_mode=fit|" "$f"
-    sed -i "s|^desktop_bg=.*|desktop_bg=#000000|" "$f"
-    sed -i "s|^desktop_fg=.*|desktop_fg=#000000|;s|^desktop_shadow=.*|desktop_shadow=#000000|" "$f"
-    sed -i "s|^show_documents=.*|show_documents=0|;s|^show_trash=.*|show_trash=0|;s|^show_mounts=.*|show_mounts=0|" "$f"
+    # Set each key, appending it under [*] when the file does not have it yet.
+    python3 - "$f" "$THEME/splash.png" <<'PY'
+import sys, pathlib, re
+f, img = pathlib.Path(sys.argv[1]), sys.argv[2]
+want = {
+    "wallpaper": img, "wallpaper_mode": "fit", "wallpaper_common": "1",
+    "desktop_bg": "#000000", "desktop_fg": "#000000", "desktop_shadow": "#000000",
+    "show_documents": "0", "show_trash": "0", "show_mounts": "0",
+}
+lines = f.read_text().splitlines()
+if not any(l.strip() == "[*]" for l in lines):
+    lines.insert(0, "[*]")
+seen = set()
+for i, l in enumerate(lines):
+    m = re.match(r"^(\w+)=", l)
+    if m and m.group(1) in want:
+        lines[i] = f"{m.group(1)}={want[m.group(1)]}"
+        seen.add(m.group(1))
+star = lines.index("[*]")
+for k, v in want.items():
+    if k not in seen:
+        star += 1
+        lines.insert(star, f"{k}={v}")
+f.write_text("\n".join(lines) + "\n")
+PY
     chown "$U:$U" "$f"
   done
 
