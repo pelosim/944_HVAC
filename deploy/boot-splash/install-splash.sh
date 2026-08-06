@@ -203,6 +203,32 @@ if [ -f "$SYSENV" ] && ! grep -q '^XCURSOR_THEME=blank' "$SYSENV"; then
   sed -i 's|^XCURSOR_THEME=.*|XCURSOR_THEME=blank|' "$SYSENV"
 fi
 
+# XCURSOR_THEME still is not the whole story. On Wayland each client supplies
+# its own pointer image, and GTK clients take the theme from their OWN setting
+# rather than the environment variable — which is why the arrow survived over
+# the pcmanfm desktop (the one place it was actually visible; Chromium's kiosk
+# never showed one). Set the GTK theme too, in both the places GTK looks.
+for U in $(ls /home); do
+  G="/home/$U/.config/gtk-3.0"
+  install -d -o "$U" -g "$U" "$G"
+  if [ -f "$G/settings.ini" ]; then
+    grep -q '^gtk-cursor-theme-name=' "$G/settings.ini" \
+      && sed -i 's|^gtk-cursor-theme-name=.*|gtk-cursor-theme-name=blank|' "$G/settings.ini" \
+      || sed -i '0,/^\[Settings\]/s||[Settings]\ngtk-cursor-theme-name=blank|' "$G/settings.ini"
+  else
+    printf '[Settings]\ngtk-cursor-theme-name=blank\n' > "$G/settings.ini"
+  fi
+  chown "$U:$U" "$G/settings.ini"
+
+  # xdg-desktop-portal-gtk serves GTK its settings from this dconf key, which
+  # takes precedence over settings.ini when the portal is running. Needs the
+  # user's live session bus, so it is a no-op when run outside one.
+  UID_N=$(id -u "$U" 2>/dev/null) || continue
+  sudo -u "$U" \
+    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$UID_N/bus" \
+    gsettings set org.gnome.desktop.interface cursor-theme 'blank' 2>/dev/null || true
+done
+
 echo "==> 7. Panel off — it draws the boot-time notification popups"
 # The "You are now connected to ..." bubbles at the top of the screen come
 # from wf-panel-pi, which /etc/xdg/labwc/autostart starts under lwrespawn.
