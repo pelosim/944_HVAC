@@ -1,7 +1,12 @@
 [Unit]
 Description=944S HVAC backend (control loop + WebSocket + dashboard server)
-After=network-online.target
-Wants=network-online.target
+# network.target, NOT network-online.target. The backend binds 0.0.0.0:8000
+# and the dashboard reaches it over loopback, so nothing here needs a routable
+# address. Waiting for "online" made NetworkManager-wait-online.service a hard
+# dependency, and that unit burns its full 60s timeout whenever wlan0 cannot
+# associate — which is most of the time in the car, where there is no wifi.
+# The result was a 60s-late backend and a dashboard that sat blank behind it.
+After=network.target
 
 [Service]
 Type=simple
