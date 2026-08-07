@@ -21,5 +21,11 @@ Thumbs.db
 *~
 .vscode/
 
+# ── Hand-made "before I changed it" snapshots on the Pi ──
+# Kept deliberately, but git history is the real record and they only ever
+# showed up as untracked noise in `git status`. Not deleted — they are the
+# author's own backups.
+*.prestatus
+
 # ── Logs ──
 *.log
