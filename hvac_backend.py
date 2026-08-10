@@ -208,6 +208,51 @@ ACCEL_FLOAT_MV = 25.0
 ACCEL_INVERT_X = False
 ACCEL_INVERT_Y = False
 
+# --- iBooster CAN (read-only) --------------------------------------
+# Tesla Gen1 iBooster on two private 2-node CAN buses, via the two CANable
+# adapters pinned by udev to can-veh / can-yaw (see the tesla-ibooster-can
+# repo's deploy/). Decode constants come from that repo's docs/DECODE.md and
+# were measured on this exact unit — do not "correct" them from community
+# sources, which describe other variants.
+#
+# READ-ONLY IS STRUCTURAL: this file opens raw AF_CAN sockets and only ever
+# recv()s. There is no send path, and none may be added — the device on the
+# other end is a brake actuator. The interfaces must stay in normal (ACK)
+# mode, which deploy/ibooster-can-up already guarantees: link-layer ACK is
+# not a command, and listen-only on a 2-node bus drives the booster bus-off.
+BOOSTER_IFACES = {"canveh": "can-veh", "canyaw": "can-yaw"}
+BOOSTER_STALE_S = 2.0      # 0x39D arrives at 25 Hz — 2 s is 50 missed frames
+
+# 0x39D (vehicle bus): b2:b3 = stroke, uint16 LE. Combined 5-point fit.
+BRAKE_STROKE_SCALE  = 320.68     # counts per mm
+BRAKE_STROKE_OFFSET = 3.3
+# Physical end stop measured at 13606 counts. On a latched fault the booster
+# pins the stroke to a SENTINEL (16354) with a still-valid checksum, so
+# anything past the end stop is fault signalling, not travel.
+BRAKE_STROKE_SENTINEL = 13700
+
+# 0x38E (YAW bus): position = b3 | ((b4 & 0x0F) << 8)  (12-bit — the high
+# nibble of b4 is STATUS, not position; only an induced fault revealed that).
+# status: 1 = healthy, 2 = fault. THE FAULT LATCHES: reconnecting the sensor
+# does not clear it and assist stays off until the booster is power-cycled.
+# status==2 therefore means "assist unavailable", NOT "position invalid" —
+# after a reconnect 0x38E resumes live position while still reporting 2.
+BRAKE_POS_SCALE  = 0.015207      # mm per count
+BRAKE_POS_OFFSET = 1.94
+
+# --- Brake pressure sensors (ON ORDER — not yet fitted) ------------
+# Two transducers, one per hydraulic circuit. ADS channel audit 2026-08-10:
+#   0x48  P0/P1/P2 flaps, P3 FREE          -> one channel available
+#   0x49  X/Y/Z accel + P3 floating ref    -> full; the ref is load-bearing
+#         (the disconnected-axis check compares against it — do not steal it)
+# Two sensors therefore need a THIRD ADS1115 at 0x4A (ADDR strapped to SDA).
+# When the parts arrive: set INSTALLED True and fill in the transfer function
+# from the sensor datasheet (typically 0.5–4.5 V ratiometric).
+BRAKE_PRESS_INSTALLED = False
+BRAKE_PRESS_I2C_ADDR  = 0x4A
+BRAKE_PRESS_CH_FRONT  = 0
+BRAKE_PRESS_CH_REAR   = 1
+
 # --- PID Tuning ---
 # These are starting points — tune on the car
 FLAP_PID_KP = 2.0    # Proportional gain
@@ -421,6 +466,38 @@ class HVACState:
 
     # ── System status screen ──────────────────────────────────────
     system_view: bool = False         # touchscreen shows the link topology page
+
+    # ── Main-screen selector ──────────────────────────────────────
+    # "hvac" or "brake". Deliberately NOT persisted: a car should always
+    # wake up showing climate control, not whatever was up at shutdown.
+    main_screen: str = "hvac"
+
+    # ── iBooster (read-only CAN) ──────────────────────────────────
+    booster_veh_online: bool = False  # 0x39D bus alive (can-veh)
+    booster_yaw_online: bool = False  # 0x38E bus alive (can-yaw)
+    booster_veh_age_s: float = -1.0
+    booster_yaw_age_s: float = -1.0
+    brake_stroke_mm: float = 0.0      # from 0x39D, checksum-validated
+    brake_stroke_raw: int = -1        # raw counts; -1 = never seen
+    brake_pos_yaw: int = -1           # 0x38E 12-bit position, cross-check
+    # 0 = unknown, 1 = healthy, 2 = FAULT (latched — power cycle to clear).
+    # 2 means "assist unavailable", not "position invalid": after a sensor
+    # reconnect the yaw position is live again while this still reads 2.
+    brake_status: int = 0
+    brake_sentinel: bool = False      # 0x39D pinned past the end stop
+
+    # ── Brake pressure (sensors on order — see BRAKE_PRESS_*) ────
+    brake_press_ok: bool = False
+    brake_press_front_psi: float = 0.0
+    brake_press_rear_psi: float = 0.0
+
+    # ── Raw CAN view ─────────────────────────────────────────────
+    # Per-ID snapshot for the dashboard's raw-frames table, rebuilt each
+    # tick. Per-ID rather than per-frame on purpose: the buses run ~186
+    # frames/s, and a scrolling firehose at 10 Hz would show a random
+    # sample. A cansniffer-style table shows everything that exists and
+    # lets the eye catch the bytes that move.
+    can_frames: list = field(default_factory=list)
 
     def to_json(self):
         return json.dumps(asdict(self))
@@ -983,6 +1060,10 @@ class HVACController:
             # "toggle" so the knob does not need to know the current state.
             self.state.system_view = (not self.state.system_view
                                       if str(v).lower() == "toggle" else bool(v))
+        if "main_screen" in cmd:
+            screen = str(cmd["main_screen"]).lower()
+            if screen in ("hvac", "brake"):
+                self.state.main_screen = screen
         if "tsdash" in cmd:
             # Page the TunerStudio dash on the TSDash Pi. Nothing is stored:
             # this is a fire-and-forget keystroke, and there is no state here
@@ -1246,6 +1327,46 @@ class HVACController:
         self.state.illum_online  = _port_up["illum"]  and _fresh(self.state.illum_age_s)
         self.state.tsdash_online = _port_up["tsdash"] and _fresh(self.state.tsdash_age_s)
 
+        # ── iBooster (read-only CAN) ──────────────────────────
+        # Tighter staleness than the serial links: 0x39D arrives at 25 Hz
+        # and 0x38E at 100 Hz, so 2 s of silence is dozens of missed frames.
+        self.state.booster_veh_age_s = _age_of("canveh", now)
+        self.state.booster_yaw_age_s = _age_of("canyaw", now)
+        self.state.booster_veh_online = 0 <= self.state.booster_veh_age_s < BOOSTER_STALE_S
+        self.state.booster_yaw_online = 0 <= self.state.booster_yaw_age_s < BOOSTER_STALE_S
+
+        with _can_lock:
+            brake = dict(_brake)
+            snap = [(link, cid, e["hz"], e["dlc"], e["data"], e["prev"],
+                     now - e["t"]) for (link, cid), e in _can_stats.items()]
+
+        self.state.brake_stroke_raw = brake["stroke_raw"]
+        self.state.brake_sentinel = brake["sentinel"]
+        self.state.brake_pos_yaw = brake["pos_yaw"]
+        # Hold status at its last value when the bus goes quiet rather than
+        # resetting to unknown: the fault LATCHES in the booster, and a
+        # latched fault with a flaky CAN lead is still a latched fault.
+        if self.state.booster_yaw_online:
+            self.state.brake_status = brake["status"]
+        # The sentinel is fault signalling, not travel — never convert it
+        # to a fake 51 mm reading.
+        if brake["stroke_raw"] < 0 or brake["sentinel"]:
+            self.state.brake_stroke_mm = 0.0
+        else:
+            self.state.brake_stroke_mm = round(max(
+                0.0, (brake["stroke_raw"] - BRAKE_STROKE_OFFSET)
+                / BRAKE_STROKE_SCALE), 2)
+
+        self.state.can_frames = [
+            {"bus": link[3:], "id": f"{cid:03X}", "hz": round(hz, 1),
+             "dlc": dlc, "data": data.hex(" ").upper(),
+             "chg": [i for i in range(min(len(data), len(prev)))
+                     if data[i] != prev[i]],
+             "stale": age > BOOSTER_STALE_S}
+            for link, cid, hz, dlc, data, prev, age in
+            sorted(snap, key=lambda r: (r[0], r[1]))
+        ]
+
         # ── Bench-test override ───────────────────────────────
         # Force a fake cabin temp so heating can be exercised indoors.
         # Not persisted; a reboot always returns to the real sensor.
@@ -1381,6 +1502,87 @@ class HVACController:
             self.hw._sim_int_temp += (self.hw._sim_mix_temp - self.hw._sim_int_temp) * 0.02
 
 
+# ── iBooster CAN readers ───────────────────────────────────────
+# One daemon thread per bus, raw AF_CAN sockets — the kernel binds the
+# CANable adapters natively, so this needs no libraries at all. recv()
+# only; there is no send path in this process and none may be added.
+#
+# Decoded values and per-ID stats land in module globals under _can_lock,
+# copied into state by tick(). Same shape as the serial reader threads.
+
+_can_lock = threading.Lock()
+_can_stats = {}   # (bus, can_id) -> {"hz","dlc","data","prev","t"}
+_brake = {"stroke_raw": -1, "status": 0, "pos_yaw": -1, "sentinel": False}
+
+_CAN_SFF_MASK = 0x000007FF
+_CAN_EFF_FLAG = 0x80000000
+_CAN_EFF_MASK = 0x1FFFFFFF
+_CAN_ERR_FLAG = 0x20000000
+
+
+def booster_reader_loop(link: str):
+    """Read one iBooster bus forever. link is 'canveh' or 'canyaw'."""
+    import socket as sk
+    import struct as st
+    iface = BOOSTER_IFACES[link]
+    complained = False
+    while True:
+        try:
+            s = sk.socket(sk.PF_CAN, sk.SOCK_RAW, sk.CAN_RAW)
+            s.bind((iface,))
+            s.settimeout(1.0)
+            complained = False
+            log.info("iBooster: %s up on %s", link, iface)
+            while True:
+                try:
+                    frame = s.recv(16)
+                except (sk.timeout, TimeoutError):
+                    continue
+                now = time.monotonic()
+                can_id, dlc = st.unpack("=IB3x", frame[:8])
+                if can_id & _CAN_ERR_FLAG:
+                    continue
+                mask = _CAN_EFF_MASK if can_id & _CAN_EFF_FLAG else _CAN_SFF_MASK
+                cid = can_id & mask
+                data = frame[8:8 + min(dlc, 8)]
+                _mark_rx(link)
+
+                with _can_lock:
+                    ent = _can_stats.get((link, cid))
+                    if ent is None:
+                        _can_stats[(link, cid)] = {"hz": 0.0, "dlc": dlc,
+                                                   "data": data, "prev": data,
+                                                   "t": now}
+                    else:
+                        dt = now - ent["t"]
+                        if dt > 1e-4:
+                            # EMA so the displayed rate is steady, not jittery
+                            ent["hz"] = 0.9 * ent["hz"] + 0.1 * (1.0 / dt)
+                        ent["prev"], ent["data"] = ent["data"], data
+                        ent["dlc"], ent["t"] = dlc, now
+
+                    if cid == 0x39D and len(data) >= 4:
+                        # Reject frames whose additive checksum fails rather
+                        # than showing a corrupt stroke as a real one.
+                        if ((data[1] + data[2] + data[3] + 0xA0) & 0xFF) == data[0]:
+                            raw = data[2] | (data[3] << 8)
+                            _brake["stroke_raw"] = raw
+                            _brake["sentinel"] = raw > BRAKE_STROKE_SENTINEL
+                    elif cid == 0x38E and len(data) >= 5:
+                        _brake["status"] = data[4] >> 4
+                        _brake["pos_yaw"] = data[3] | ((data[4] & 0x0F) << 8)
+        except OSError as e:
+            if not complained:
+                log.warning("iBooster: %s (%s) unavailable: %s — retrying",
+                            link, iface, e)
+                complained = True
+            try:
+                s.close()
+            except Exception:
+                pass
+            time.sleep(3)
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # FastAPI + WebSocket Server
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1420,7 +1622,8 @@ LINK_STALE_S = 10.0
 # Monotonic stamp of the last line received from each link. Written by the
 # reader threads, read by tick(). Plain floats: assignment is atomic under the
 # GIL and a torn read here would only ever be one tick stale.
-_last_rx = {"idrive": 0.0, "illum": 0.0, "tsdash": 0.0}
+_last_rx = {"idrive": 0.0, "illum": 0.0, "tsdash": 0.0,
+            "canveh": 0.0, "canyaw": 0.0}
 
 # Whether the reader thread currently holds the port open. Separate from
 # freshness on purpose: an open port that has gone quiet is a different fault
@@ -1736,6 +1939,10 @@ async def startup():
     asyncio.create_task(control_loop())
     threading.Thread(target=idrive_reader_loop, daemon=True,
                      name="idrive-reader").start()
+    threading.Thread(target=booster_reader_loop, args=("canveh",), daemon=True,
+                     name="booster-veh-reader").start()
+    threading.Thread(target=booster_reader_loop, args=("canyaw",), daemon=True,
+                     name="booster-yaw-reader").start()
     threading.Thread(target=lighting_reader_loop, daemon=True,
                      name="lighting-reader").start()
     threading.Thread(target=tsdash_reader_loop, daemon=True,

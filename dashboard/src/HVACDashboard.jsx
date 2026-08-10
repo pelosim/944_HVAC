@@ -414,6 +414,225 @@ function OutletButton({ label, icon, level, color, onPress }) {
   );
 }
 
+// ════════════════════════════════════════════════════════════════
+// BRAKE SCREEN — iBooster monitor (read-only CAN)
+// ════════════════════════════════════════════════════════════════
+// Decode facts and their provenance live in the tesla-ibooster-can repo's
+// docs/DECODE.md. Two rules inherited from there shape this screen:
+//   - status==2 means ASSIST UNAVAILABLE, not "position invalid". The fault
+//     latches in the booster until a power cycle, and position keeps
+//     reporting through it — so the stroke bar stays live during a fault.
+//   - a stroke past the end stop is the fault sentinel, never travel. The
+//     backend already zeroes it; this screen must not re-derive mm from raw.
+
+function BusDot({ label, online, age, hz }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+      <div style={{
+        width: 10, height: 10, borderRadius: "50%",
+        background: online ? C.green : C.red,
+        boxShadow: online ? `0 0 8px ${C.green}` : "none",
+      }} />
+      <span style={{ fontFamily: "'Orbitron',monospace", fontSize: 16,
+        fontWeight: 700, color: online ? C.text : C.red, letterSpacing: 1 }}>
+        {label}</span>
+      <span style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 16,
+        color: C.mid }}>
+        {online ? `${hz} Hz` : age < 0 ? "never seen" : `silent ${ageText(age)}`}
+      </span>
+    </div>
+  );
+}
+
+function PressTile({ label, ok, psi }) {
+  return (
+    <div style={{
+      flex: 1, borderRadius: 8, border: `1.5px solid ${ok ? C.ice : C.line}`,
+      background: `linear-gradient(180deg, ${C.fasciaHi}, ${C.fascia})`,
+      padding: "12px 16px", textAlign: "center",
+    }}>
+      <div style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 17,
+        fontWeight: 700, letterSpacing: 2, color: C.mid }}>{label}</div>
+      {ok ? (
+        <div style={{ fontFamily: "'Orbitron',monospace", fontSize: 44,
+          fontWeight: 800, color: C.ice, fontVariantNumeric: "tabular-nums",
+          textShadow: `0 0 14px ${C.ice}50` }}>
+          {Math.round(psi)}<span style={{ fontSize: 18, color: C.mid }}> psi</span>
+        </div>
+      ) : (
+        <div style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 19,
+          fontWeight: 600, color: C.dim, padding: "12px 0" }}>
+          SENSOR NOT FITTED</div>
+      )}
+    </div>
+  );
+}
+
+const STROKE_FULL_MM = 45;       // bar span; end stop measured at 43.4
+const STROKE_ENDSTOP_MM = 43.4;
+
+function BrakeScreen({ st }) {
+  // Status is meaningful only while the YAW bus has ever spoken; the
+  // backend holds the last value through dropouts because the fault
+  // latches, so "unknown" here really means "never heard from it".
+  const noData = st.brakeStatus === 0;
+  const fault = st.brakeStatus === 2;
+  const pct = Math.max(0, Math.min(100, (st.brakeStrokeMm / STROKE_FULL_MM) * 100));
+  const yawMm = st.brakePosYaw >= 0 ? 0.015207 * st.brakePosYaw + 1.94 : null;
+
+  const statusColor = noData ? C.dim : fault ? C.red : C.green;
+  const panel = {
+    borderRadius: 10, border: `1.5px solid ${C.line}`,
+    background: `linear-gradient(180deg, ${C.fasciaHi}, ${C.fascia})`,
+    boxShadow: "0 2px 10px rgba(0,0,0,0.45)", padding: "18px 22px",
+    display: "flex", flexDirection: "column",
+  };
+  const h = (t) => (
+    <div style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 18,
+      fontWeight: 700, letterSpacing: 2.6, color: C.dim, marginBottom: 10 }}>{t}</div>
+  );
+
+  return (
+    <div style={{
+      position: "absolute", top: 70, left: 0, right: 0, bottom: 0,
+      zIndex: 10, background: C.bg, display: "flex", gap: 18,
+      padding: "20px 24px 22px",
+    }}>
+      {/* ── stroke ── */}
+      <div style={{ ...panel, flex: "0 0 560px" }}>
+        {h("PEDAL STROKE · 0x39D")}
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+          <span style={{ fontFamily: "'Orbitron',monospace", fontSize: 112,
+            fontWeight: 800, lineHeight: 0.95, fontVariantNumeric: "tabular-nums",
+            color: st.brakeSentinel ? C.dim : C.vfd,
+            textShadow: st.brakeSentinel ? "none" : `0 0 22px ${C.vfd}55` }}>
+            {st.brakeSentinel ? "--" : st.brakeStrokeMm.toFixed(1)}
+          </span>
+          <span style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 30,
+            fontWeight: 600, color: C.mid }}>mm</span>
+        </div>
+
+        {/* bar with end-stop tick */}
+        <div style={{ position: "relative", height: 34, marginTop: 16,
+          border: `1.5px solid ${C.line}`, borderRadius: 6, overflow: "hidden",
+          background: C.segOff }}>
+          <div style={{ position: "absolute", left: 0, top: 0, bottom: 0,
+            width: `${pct}%`,
+            background: `linear-gradient(90deg, ${C.vfd}30, ${C.vfd}88)`,
+            borderRight: pct > 1 ? `2px solid ${C.vfd}` : "none",
+            transition: "width 0.12s linear" }} />
+          <div style={{ position: "absolute", top: 0, bottom: 0,
+            left: `${(STROKE_ENDSTOP_MM / STROKE_FULL_MM) * 100}%`,
+            width: 2, background: C.amber }} />
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between",
+          fontFamily: "'Rajdhani',sans-serif", fontSize: 15, color: C.dim,
+          marginTop: 4 }}>
+          <span>0</span><span style={{ color: C.amber }}>end stop 43.4</span>
+        </div>
+
+        <div style={{ marginTop: 14, fontFamily: "'Orbitron',monospace",
+          fontSize: 16, color: C.mid, fontVariantNumeric: "tabular-nums" }}>
+          raw {st.brakeStrokeRaw < 0 ? "----" : st.brakeStrokeRaw}
+          <span style={{ color: C.dim }}>
+            {"  ·  yaw x-check "}
+            {yawMm === null ? "--" : `${yawMm.toFixed(1)} mm`}
+          </span>
+        </div>
+
+        <div style={{ flex: 1 }} />
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <BusDot label="CAN-VEH" online={st.boosterVehOnline}
+            age={st.boosterVehAge} hz={25} />
+          <BusDot label="CAN-YAW" online={st.boosterYawOnline}
+            age={st.boosterYawAge} hz={100} />
+        </div>
+      </div>
+
+      {/* ── status + pressure ── */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 18,
+        flex: "0 0 420px" }}>
+        <div style={{ ...panel, flex: 1, alignItems: "center",
+          justifyContent: "center", border: `2px solid ${statusColor}`,
+          boxShadow: fault ? `0 0 30px ${C.red}40` : panel.boxShadow }}>
+          <div style={{
+            fontFamily: "'Orbitron',monospace", fontSize: fault ? 40 : 34,
+            fontWeight: 800, letterSpacing: 3, color: statusColor,
+            textShadow: `0 0 16px ${statusColor}60`, textAlign: "center",
+            animation: fault ? "pulse 1s ease-in-out infinite" : "none",
+          }}>
+            {noData ? "NO DATA" : fault ? "FAULT LATCHED" : "ASSIST OK"}
+          </div>
+          <div style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 19,
+            fontWeight: 600, color: fault ? C.text : C.mid, marginTop: 10,
+            textAlign: "center", maxWidth: 330 }}>
+            {noData
+              ? "booster has not spoken on the YAW bus"
+              : fault
+                ? "assist is OFF and stays off — cycle the ignition to clear"
+                : "booster assisting · status nibble 1"}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 14 }}>
+          <PressTile label="FRONT CIRCUIT" ok={st.brakePressOk} psi={st.brakePressFront} />
+          <PressTile label="REAR CIRCUIT" ok={st.brakePressOk} psi={st.brakePressRear} />
+        </div>
+      </div>
+
+      {/* ── raw CAN ── */}
+      <div style={{ ...panel, flex: 1, minWidth: 0 }}>
+        {h("RAW CAN · PER-ID LIVE")}
+        <div style={{
+          display: "grid", gridTemplateColumns: "70px 64px 74px 44px 1fr",
+          gap: "0 12px", fontFamily: "'Rajdhani',sans-serif", fontSize: 15,
+          fontWeight: 700, letterSpacing: 1.5, color: C.dim, paddingBottom: 6,
+          borderBottom: `1px solid ${C.line}` }}>
+          <span>BUS</span><span>ID</span>
+          <span style={{ textAlign: "right" }}>Hz</span>
+          <span style={{ textAlign: "right" }}>DLC</span><span>DATA</span>
+        </div>
+        <div style={{ overflowY: "auto", flex: 1 }}>
+          {(st.canFrames || []).map((f) => (
+            <div key={`${f.bus}${f.id}`} style={{
+              display: "grid", gridTemplateColumns: "70px 64px 74px 44px 1fr",
+              gap: "0 12px", alignItems: "baseline", padding: "5px 0",
+              borderBottom: `1px solid ${C.line}55`,
+              opacity: f.stale ? 0.35 : 1 }}>
+              <span style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 15,
+                fontWeight: 700, letterSpacing: 1,
+                color: f.bus === "veh" ? C.ice : C.amber }}>
+                {f.bus.toUpperCase()}</span>
+              <span style={{ fontFamily: "'Orbitron',monospace", fontSize: 17,
+                fontWeight: 700, color: C.text }}>{f.id}</span>
+              <span style={{ fontFamily: "'Orbitron',monospace", fontSize: 15,
+                color: C.mid, textAlign: "right",
+                fontVariantNumeric: "tabular-nums" }}>{f.hz}</span>
+              <span style={{ fontFamily: "'Orbitron',monospace", fontSize: 15,
+                color: C.dim, textAlign: "right" }}>{f.dlc}</span>
+              <span style={{ fontFamily: "'Orbitron',monospace", fontSize: 16,
+                letterSpacing: 1, whiteSpace: "nowrap", overflow: "hidden" }}>
+                {f.data.split(" ").map((b, i) => (
+                  <span key={i} style={{
+                    color: (f.chg || []).includes(i) ? C.amber : C.mid,
+                    textShadow: (f.chg || []).includes(i)
+                      ? `0 0 8px ${C.amber}70` : "none",
+                    marginRight: 7 }}>{b}</span>
+                ))}
+              </span>
+            </div>
+          ))}
+          {(!st.canFrames || st.canFrames.length === 0) && (
+            <div style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 18,
+              color: C.dim, padding: "18px 0" }}>
+              no frames — booster off, or CAN interfaces down
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SystemStatus({ st, onClose }) {
   // ── Derive each link's state from what the backend can actually see ──
   const flapFault = st.mixFault || st.defFault || st.footFault;
@@ -439,6 +658,12 @@ function SystemStatus({ st, onClose }) {
     // A partly-wired accelerometer is a fault, not a degraded sensor: the
     // G-meter would still draw a dot, just in the wrong place.
     accel:  st.accelOk ? S_OK : st.accelBad ? S_BAD : S_UNK,
+    // iBooster: a latched fault outranks healthy buses — the booster is
+    // still talking fine while assist is off, and "links up" is not the
+    // claim a brake page should lead with. Never-spoken stays grey.
+    boost:  st.brakeStatus === 2 ? S_BAD
+            : st.boosterVehOnline && st.boosterYawOnline ? S_OK
+            : (st.boosterVehAge < 0 && st.boosterYawAge < 0) ? S_UNK : S_BAD,
   };
   const vals = Object.values(L);
   const nBad = vals.filter((v) => v === S_BAD).length;
@@ -460,6 +685,11 @@ function SystemStatus({ st, onClose }) {
     `axis ${st.accelBad.toUpperCase()} reads as an unconnected pin`]);
   if (L.hw === S_BAD) attention.push([C.red, "HVAC HARDWARE",
     flapFault ? "flap travel fault" : !st.onewireOk ? "1-Wire bus down" : "ADS1115 not answering"]);
+  if (st.brakeStatus === 2) attention.push([C.red, "iBOOSTER",
+    "fault LATCHED - assist off until ignition cycle"]);
+  else if (L.boost === S_BAD) attention.push([C.red, "Pi -> iBOOSTER",
+    !st.boosterVehOnline && !st.boosterYawOnline ? "both CAN buses silent"
+      : `can-${st.boosterVehOnline ? "yaw" : "veh"} silent`]);
   if (st.flapsHeld) attention.push([C.dim, "FLAP HELD",
     `${st.flapsHeld.toUpperCase()} not driven — awaiting recalibration`]);
   attention.push([C.dim, "HEAD UNIT - IR", "write-only, no feedback path"]);
@@ -508,6 +738,7 @@ function SystemStatus({ st, onClose }) {
         <SysLink d="M1456,522 L1196,522" st={L.ms3}    label="FTDI" lx={1326} ly={506} />
         <SysLink d="M296,588 L336,588"   st={L.espnow} label="NOW"  lx={316} ly={578} />
         <SysLink d="M596,588 L636,588"   st={L.light} />
+        <SysLink d="M296,298 L336,298"   st={L.boost}  label="CAN×2" lx={316} ly={288} />
 
         {/* nodes */}
         <SysNode x={46}   y={114} title="iDRIVE KNOB"   st={L.can} />
@@ -515,6 +746,11 @@ function SystemStatus({ st, onClose }) {
           sub={st.idriveOnline ? ageText(st.idriveAge)
                : st.idriveAge < 0 ? "no heartbeat" : "silent"} st={L.uart} />
         <SysNode x={636}  y={114} title="HEAD UNIT"     st={L.ir} />
+        <SysNode x={46}   y={266} title="iBOOSTER"
+          sub={st.brakeStatus === 2 ? "FAULT latched"
+               : L.boost === S_OK ? `${st.brakeStrokeMm.toFixed(1)} mm`
+               : L.boost === S_UNK ? "not connected" : "bus silent"}
+          st={L.boost} />
         <SysNode x={336}  y={246} w={260} h={104} title="HVAC Pi"
           sub={`up ${Math.floor(st.uptime / 3600)}h ${Math.floor((st.uptime % 3600) / 60)}m`}
           st={S_OK} />
@@ -633,6 +869,22 @@ export default function HVACDashboard() {
   const [idriveActive, setIdriveActive] = useState(false);
   const [illumCh1, setIllumCh1] = useState(0);
 
+  // ─── Main screen + iBooster brake data ────────────────────
+  const [mainScreen, setMainScreen] = useState("hvac");
+  const [boosterVehOnline, setBoosterVehOnline] = useState(false);
+  const [boosterYawOnline, setBoosterYawOnline] = useState(false);
+  const [boosterVehAge, setBoosterVehAge] = useState(-1);
+  const [boosterYawAge, setBoosterYawAge] = useState(-1);
+  const [brakeStrokeMm, setBrakeStrokeMm] = useState(0);
+  const [brakeStrokeRaw, setBrakeStrokeRaw] = useState(-1);
+  const [brakePosYaw, setBrakePosYaw] = useState(-1);
+  const [brakeStatus, setBrakeStatus] = useState(0);
+  const [brakeSentinel, setBrakeSentinel] = useState(false);
+  const [brakePressOk, setBrakePressOk] = useState(false);
+  const [brakePressFront, setBrakePressFront] = useState(0);
+  const [brakePressRear, setBrakePressRear] = useState(0);
+  const [canFrames, setCanFrames] = useState([]);
+
   const sendCmd = useCallback((cmd) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       // Remember what we just commanded so stale in-flight broadcasts for these
@@ -716,6 +968,20 @@ export default function HVACDashboard() {
           apply("g_lateral", setGLat);
           apply("g_longitudinal", setGLon);
           apply("accel_axes_bad", setAccelBad);
+          apply("main_screen", setMainScreen);
+          apply("booster_veh_online", setBoosterVehOnline);
+          apply("booster_yaw_online", setBoosterYawOnline);
+          apply("booster_veh_age_s", setBoosterVehAge);
+          apply("booster_yaw_age_s", setBoosterYawAge);
+          apply("brake_stroke_mm", setBrakeStrokeMm);
+          apply("brake_stroke_raw", setBrakeStrokeRaw);
+          apply("brake_pos_yaw", setBrakePosYaw);
+          apply("brake_status", setBrakeStatus);
+          apply("brake_sentinel", setBrakeSentinel);
+          apply("brake_press_ok", setBrakePressOk);
+          apply("brake_press_front_psi", setBrakePressFront);
+          apply("brake_press_rear_psi", setBrakePressRear);
+          apply("can_frames", setCanFrames);
         } catch (e) { /* ignore */ }
       };
       ws.onclose = () => {
@@ -756,6 +1022,7 @@ export default function HVACDashboard() {
   // Tap-to-dismiss mirrors the BACK button. Sent as an explicit false rather
   // than "toggle" so a tap can never race the knob into re-opening the page.
   const cmdCloseSystem = () => { setSystemView(false); sendCmd({ system_view: false }); };
+  const cmdMainScreen = (v) => { setMainScreen(v); sendCmd({ main_screen: v }); };
   const cmdAcOn = (v) => { setAcOn(v); sendCmd({ ac_on: v }); };
   const cmdHeatValve = (v) => { setHeatValve(v); sendCmd({ heat_valve: v }); };
   const cmdOutsideAir = (v) => { setOutsideAir(v); sendCmd({ outside_air: v }); };
@@ -897,8 +1164,24 @@ export default function HVACDashboard() {
               onewireOk, adsOk, wsConnected, uptime, flapsHeld,
               accelOk, accelBad, gLat, gLon,
               mixFault: mixFlapFault, defFault: defrostFlapFault, footFault: footFlapFault,
+              boosterVehOnline, boosterYawOnline, boosterVehAge, boosterYawAge,
+              brakeStatus, brakeStrokeMm,
             }}
           />
+        )}
+
+        {/* ════ BRAKE SCREEN ════
+            Below the glass overlay for the same reason SystemStatus is, and
+            below SystemStatus itself so BACK still reveals whichever main
+            screen was selected. Starts at y=70 so the header rail — and the
+            VIEW switch that got you here — never leaves the screen. */}
+        {mainScreen === "brake" && (
+          <BrakeScreen st={{
+            boosterVehOnline, boosterYawOnline, boosterVehAge, boosterYawAge,
+            brakeStrokeMm, brakeStrokeRaw, brakePosYaw, brakeStatus,
+            brakeSentinel, brakePressOk, brakePressFront, brakePressRear,
+            canFrames,
+          }} />
         )}
 
         {/* glass + scanline atmosphere over everything */}
@@ -970,6 +1253,35 @@ export default function HVACDashboard() {
             <Lamp label="HEAT VLV" on={heatValve} color={C.amber} />
             <Lamp label="A/C CLU" on={acOn} color={C.ice} />
             <Lamp label="FLAP" on={anyFlapFault} color={C.red} blink />
+            {/* Lights ONLY on a latched booster fault — visible from either
+                screen, because the fault outlives whatever page is showing. */}
+            <Lamp label="BRAKE" on={brakeStatus === 2} color={C.red} blink />
+          </div>
+
+          {/* Main screen selector — same idiom as AUX so it reads as one
+              family of controls. Two labelled buttons rather than a toggle:
+              a toggle showing either current or target is ambiguous both ways. */}
+          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+            <span style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 16, fontWeight: 700,
+              letterSpacing: 2, color: C.dim, whiteSpace: "nowrap" }}>VIEW</span>
+            <div style={{ display: "flex", border: `1.5px solid ${C.line}`,
+              borderRadius: 7, overflow: "hidden" }}>
+              {[{ k: "hvac", l: "HVAC" }, { k: "brake", l: "BRAKE" }].map((o) => {
+                const on = mainScreen === o.k;
+                const alert = o.k === "brake" && brakeStatus === 2;
+                return (
+                  <button key={o.k} onClick={() => cmdMainScreen(o.k)} style={{
+                    padding: "9px 15px", border: "none",
+                    background: on ? (alert ? "rgba(255,59,48,0.18)" : C.vfdDim) : "transparent",
+                    color: alert ? C.red : on ? C.vfd : C.mid,
+                    fontFamily: "'Rajdhani',sans-serif", fontSize: 19, fontWeight: 700,
+                    letterSpacing: 1.6, whiteSpace: "nowrap",
+                    textShadow: on ? `0 0 9px ${(alert ? C.red : C.vfd)}70` : "none",
+                    transition: "all 0.15s",
+                  }}>{o.l}</button>
+                );
+              })}
+            </div>
           </div>
 
           {/* Round auxiliary screen selector */}
