@@ -317,8 +317,12 @@ def cmd_sweep(args, chans):
         print("  !! that is a very small span — feedback may not be tracking the flap")
     print(f"  suggested limits, {margin} mV inside each end:")
     print(f"    0% = {lo + margin:.0f} mV     100% = {hi - margin:.0f} mV")
-    print("  (backend currently uses one global pair for all three flaps:")
-    print("   ADC_MV_MIN=225, ADC_MV_MAX=4090)")
+    # Deliberately does NOT print what the backend currently uses. The old
+    # version claimed one global ADC_MV_MIN/MAX pair for all three flaps; that
+    # had not been true since per-flap FLAP_CAL went in, and a tool that states
+    # a stale calibration as fact is worse than one that says nothing.
+    print(f"  put these in FLAP_CAL[{args.flap}] in hvac_backend.py "
+          f"(see docs/FLAP_CALIBRATION.md)")
     return 0
 
 

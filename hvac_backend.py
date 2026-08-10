@@ -109,11 +109,6 @@ ADS_MIX_CHANNEL    = 0   # P0 — mixing flap feedback
 ADS_DEF_CHANNEL    = 1   # P1 — defroster flap feedback
 ADS_FOOT_CHANNEL   = 2   # P2 — footwell flap feedback
 
-# --- Analog Scaling ---
-# Kept for anything still referencing them; the flaps use FLAP_CAL below.
-ADC_MV_MIN = 225     # mV at 0% position
-ADC_MV_MAX = 4090    # mV at 100% position
-
 # --- Vent distribution -------------------------------------------
 # There is no face flap. Defrost and footwell are DIVERTERS, and face gets
 # whatever they do not take — which is why face can only ever be commanded

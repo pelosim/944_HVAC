@@ -1,250 +1,191 @@
 # 944S HVAC — Deployment Guide
 
-## What You're Installing
+How code gets from the Mac to the car. Current as of 2026-08-06.
 
-This system replaces your entire Node-RED stack with two components:
-
-| Component | What it does | Technology |
-|-----------|-------------|------------|
-| **Backend** (`hvac_backend.py`) | Reads sensors, drives outputs, runs PID loops | Python 3 + FastAPI |
-| **Frontend** (`944_hvac_dashboard.jsx`) | Touch UI on the 1920×720 display | React (built to static HTML) |
-
-The backend runs as a systemd service (auto-starts at boot, auto-restarts on crash).
-The frontend is served by the backend and displayed in Chromium kiosk mode.
+> This replaced a guide describing an install that no longer exists —
+> `/home/pi`, a `setup.sh` bootstrap, a `hvac` service, `unclutter` on X11, and
+> Node-RED to disable. None of that is true now. If you find those names
+> anywhere else, they are stale.
 
 ---
 
-## Files You Downloaded from Claude
+## The system as it stands
 
-| File | Purpose | Goes where on Pi |
-|------|---------|------------------|
-| `hvac_backend.py` | Python backend with all IO + PID control | `/home/pi/hvac/` |
-| `944_hvac_dashboard.jsx` | React dashboard component | `/home/pi/hvac/` (setup copies it into React app) |
-| `App.js` | React wrapper (imports the dashboard) | `/home/pi/hvac/dashboard/src/` |
-| `index.css` | Fullscreen dark-mode CSS | `/home/pi/hvac/dashboard/src/` |
-| `setup.sh` | Automated install script | Run from anywhere |
-| `944S_HVAC_SETUP.md` | Architecture reference | Keep for reference |
+| Piece | Where | Runs as |
+|-------|-------|---------|
+| Backend | `/home/mark/hvac/hvac_backend.py` | systemd service **`hvac-backend`** |
+| Dashboard | `/home/mark/hvac/dashboard/build/` | served by the backend at `:8000` |
+| Dashboard kiosk | Chromium `--kiosk`, class `hvac-dash` | labwc autostart → `HDMI-A-1` |
+| Aux kiosk | Chromium `--kiosk`, class `hvac-clock` | labwc autostart → `HDMI-A-2` |
 
----
-
-## Step-by-Step Deployment
-
-### 1. Get files onto the Pi
-
-**Option A — From your Mac via SCP** (easiest if Pi is on your network):
-```bash
-# Find your Pi's IP address (on the Pi, run: hostname -I)
-# Then from your Mac Terminal:
-
-scp hvac_backend.py pi@<PI_IP>:/home/pi/
-scp 944_hvac_dashboard.jsx pi@<PI_IP>:/home/pi/
-scp App.js pi@<PI_IP>:/home/pi/
-scp index.css pi@<PI_IP>:/home/pi/
-scp setup.sh pi@<PI_IP>:/home/pi/
-```
-
-**Option B — USB drive:**
-1. Copy all files to a USB stick
-2. Plug into the Pi
-3. Mount and copy:
-```bash
-sudo mount /dev/sda1 /mnt
-cp /mnt/hvac_backend.py /home/pi/
-cp /mnt/944_hvac_dashboard.jsx /home/pi/
-cp /mnt/App.js /home/pi/
-cp /mnt/index.css /home/pi/
-cp /mnt/setup.sh /home/pi/
-sudo umount /mnt
-```
-
-**Option C — Direct download** (if Pi has internet):
-Open this Claude conversation on the Pi's browser and download each file directly.
-
-### 2. Run the setup script
-
-SSH into the Pi or open a terminal on it:
-
-```bash
-cd /home/pi
-chmod +x setup.sh
-./setup.sh
-```
-
-This will take 10–20 minutes (mostly npm installing React dependencies and building). 
-It handles everything: system packages, Python libraries, Node.js, React build, 
-systemd service, Chromium kiosk, and display config.
-
-### 3. Move your files into position
-
-After setup.sh creates the project structure:
-
-```bash
-# Move backend into project directory
-mv /home/pi/hvac_backend.py /home/pi/hvac/
-
-# The dashboard component — setup.sh should have handled this,
-# but if it didn't find the file:
-cp /home/pi/944_hvac_dashboard.jsx /home/pi/hvac/dashboard/src/HVACDashboard.jsx
-
-# Copy the React wrapper files
-cp /home/pi/App.js /home/pi/hvac/dashboard/src/App.js
-cp /home/pi/index.css /home/pi/hvac/dashboard/src/index.css
-
-# Rebuild the React app after copying files
-cd /home/pi/hvac/dashboard
-npm run build
-```
-
-### 4. Test manually before enabling auto-start
-
-```bash
-cd /home/pi/hvac
-python3 hvac_backend.py
-```
-
-You should see:
-```
-INFO:     HVAC controller started — SIMULATION mode
-INFO:     Uvicorn running on http://0.0.0.0:8000
-```
-
-(It says SIMULATION if your sensors/relays aren't wired yet — that's fine.)
-
-Open Chromium on the Pi and go to `http://localhost:8000` — you should see the dashboard.
-
-Press `Ctrl+C` to stop the manual test.
-
-### 5. Start the service
-
-```bash
-sudo systemctl start hvac
-sudo systemctl status hvac
-```
-
-Check for errors:
-```bash
-journalctl -u hvac -f
-```
-
-### 6. Reboot for full auto-start test
-
-```bash
-sudo reboot
-```
-
-After reboot, the Pi should:
-1. Start the HVAC backend automatically (systemd)
-2. Launch Chromium in kiosk mode pointing at localhost:8000
-3. Display the dashboard fullscreen on the 1920×720 display
-4. Hide the mouse cursor after 0.5 seconds of inactivity
-5. Never blank the screen
+Raspberry Pi 4, Bookworm, **Wayland/labwc**, user `mark`, autologin session
+`LXDE-pi-labwc`. Passwordless sudo. Python 3.11.
 
 ---
 
-## System Dependencies Summary
+## Reaching the Pi
 
-Here's everything the setup script installs, in case you need to install manually:
-
-### System Packages (apt)
-```
-python3-pip          Python package manager
-python3-dev          Python headers (for native extensions)
-python3-venv         Virtual environments (optional)
-python3-smbus        I²C Python bindings
-i2c-tools            i2cdetect diagnostic tool
-chromium-browser     Kiosk display
-unclutter            Hides mouse cursor
-xdotool              X11 window management
-nodejs (v20 LTS)     React build toolchain
-npm                  Node package manager
+```bash
+ssh pi944                                        # alias, key ~/.ssh/id_944pi
+ssh -i ~/.ssh/id_944pi mark@192.168.1.142        # fallback
 ```
 
-### Python Packages (pip)
-```
-fastapi              Web framework + WebSocket server
-uvicorn[standard]    ASGI server (runs FastAPI)
-websockets           WebSocket protocol support
-RPi.GPIO             Direct GPIO pin control
-gpiozero             Higher-level GPIO (optional, useful for debugging)
-w1thermsensor        DS18B20 temperature sensor driver
-adafruit-circuitpython-ads1x15   ADS1115 16-bit ADC driver
-```
+The alias resolves `944HVACPi.local` over mDNS. **That name does not always
+resolve from the Mac** — it failed outright on 2026-08-06 with `nodename nor
+servname provided`. When it does, go straight to the IP rather than assuming
+the Pi is down. DHCP: eth0 `192.168.1.142`, wlan0 varies.
 
-### Node/React Packages (npm, inside dashboard/)
-```
-react                UI library
-react-dom            DOM renderer
-react-scripts        Build toolchain (webpack, babel, etc.)
-```
-(These are installed automatically by `create-react-app`)
+The Pi is often off the network entirely. The workflow assumes that.
 
 ---
 
-## Useful Commands
+## The deploy loop
+
+Edit and commit on the Mac, push, pull on the Pi.
 
 ```bash
-# Service management
-sudo systemctl start hvac        # Start
-sudo systemctl stop hvac         # Stop
-sudo systemctl restart hvac      # Restart
-sudo systemctl status hvac       # Status
-journalctl -u hvac -f            # Live logs
-journalctl -u hvac --since today # Today's logs
+# Mac
+cd ~/Downloads/944_HVAC_repo
+git add -A && git commit -m "..." && git push origin main
 
-# Quick hardware checks
-i2cdetect -y 1                   # Scan I²C bus (should show 48)
-ls /sys/bus/w1/devices/28-*      # List DS18B20 sensors
-cat /sys/bus/w1/devices/28-000000bd3d51/temperature  # Raw temp reading
-
-# Manual motor test (careful — this drives real hardware!)
-python3 -c "
-import RPi.GPIO as GPIO
-GPIO.setmode(GPIO.BCM)
-GPIO.setup(24, GPIO.OUT)
-GPIO.output(24, GPIO.HIGH)  # Drive mixing flap HOT direction
-import time; time.sleep(0.5)
-GPIO.output(24, GPIO.LOW)   # Stop
-GPIO.cleanup()
-"
-
-# Rebuild dashboard after code changes
-cd /home/pi/hvac/dashboard
-npm run build
-sudo systemctl restart hvac
-
-# Check what's using port 8000
-sudo lsof -i :8000
-
-# Kill Chromium if it's stuck
-pkill chromium
+# Pi
+ssh pi944 'cd ~/hvac && git pull'
 ```
+
+Then, depending on what changed:
+
+| Changed | Also needed |
+|---------|-------------|
+| `hvac_backend.py` | `sudo systemctl restart hvac-backend` |
+| `dashboard/src/*.jsx` | `cd ~/hvac/dashboard && npm run build`, then restart the backend |
+| `deploy/*.sh` | run the relevant script — see below |
+| kiosk/display config | `bash ~/hvac/deploy/setup-displays.sh`, then reboot |
+
+`dashboard/build/` is gitignored and device-local. **Editing `src/` does
+nothing until a rebuild.** Browser cache is the usual reason a rebuilt
+dashboard still looks old — hard-refresh with Ctrl+Shift+R, or restart the
+kiosk.
+
+### Never start the backend by hand
+
+```bash
+python3 hvac_backend.py      # ← don't
+```
+
+The service is already running. A second copy fights it for port 8000 and for
+the GPIO, and you get `A PWM object already exists`. Use `systemctl`. If
+something is genuinely stuck on the port, `sudo fuser -k 8000/tcp`.
+
+### The pkill footgun
+
+Never `pkill -f hvac_backend` or `pkill -f chromium` in an SSH one-liner. The
+pattern matches the SSH shell's own argv and kills your session. Use
+`systemctl`, `fuser`, or name-only `pkill chromium`.
+
+---
+
+## Provisioning scripts
+
+All idempotent, all in `deploy/`. Run from `~/hvac`.
+
+| Script | Run as | Does |
+|--------|--------|------|
+| `install.sh` | `mark` | systemd unit, enables it, installs the labwc autostart |
+| `setup-displays.sh` | `mark` | Writes `cmdline.txt` video mode, kanshi layout, labwc window rules + touch mapping — all three from one pair of constants. Reboot after |
+| `boot-splash/install-splash.sh` | `sudo` | Splash images, plymouth theme, per-output wallpaper, transparent pointer, disables the panel |
+| `setup-rtc.sh` | `sudo` | DS3231 RTC on I²C `0x68` |
+| `check-adc.py` | `mark` | Reads both ADS1115s from raw millivolts |
+| `flap-pulse.py` | `mark` | Flap movement and calibration — **stop the backend first** |
+
+`setup-displays.sh` and `install-splash.sh` share the output→role mapping
+(`HDMI-A-1` = dashboard bar, `HDMI-A-2` = round aux). Change it in both.
+
+See [`DISPLAYS_AND_BOOT.md`](DISPLAYS_AND_BOOT.md) for what those two actually
+configure and why it is more delicate than it looks.
+
+---
+
+## Health check
+
+```bash
+systemctl is-active hvac-backend
+journalctl -u hvac-backend -f
+curl -s localhost:8000/api/state | python3 -m json.tool | head -40
+
+pgrep -cf chromium-dash ; pgrep -cf chromium-clock   # kiosks (multi-process, >1 each)
+wlr-randr                                            # outputs and their geometry
+tail -3 ~/hvac/kiosk.log ~/hvac/clock.log
+```
+
+Expect **~19 s from power-on to a live dashboard**. If it is closer to 70 s,
+something has reintroduced a `network-online.target` dependency on
+`hvac-backend.service` — see `DISPLAYS_AND_BOOT.md`.
+
+---
+
+## Hardware interfaces
+
+```bash
+i2cdetect -y 1                     # 48 = flap ADS1115, 68 = DS3231 RTC, 49 = accelerometer ADS
+ls /sys/bus/w1/devices/28-*        # DS18B20 sensors
+```
+
+Sensor IDs in the backend have **no `28-` prefix** — `w1thermsensor` strips it.
+Mixing chamber `000000bd3d51`, exterior `000000be5d11`, interior
+`000000bbdd26`. The bus is re-scanned periodically, not only at startup, so a
+sensor that comes back after a bad connection is picked up without a restart.
+
+---
+
+## Building the dashboard
+
+```bash
+cd ~/hvac/dashboard && npm run build
+```
+
+`package-lock.json` is tracked — use it. The build is fussy:
+
+- A leftover `.eslintrc.js` referencing `airbnb` fails the build. Delete it.
+- React 18 needs `createRoot` in `index.js`, not `ReactDOM.render`.
+
+`node_modules/` and `build/` are gitignored and stay on the device.
+
+---
+
+## Backend invariants
+
+These have regressed before when the file was regenerated wholesale. Keep them:
+
+1. ADS channels via `AnalogIn(ads, 0/1/2)` — **not** `ADS.P0/P1/P2` (removed from the library).
+2. `connected_clients = set()` with **no** type hint — `set[WebSocket]` breaks on Python 3.11.
+3. `control_loop()` starts with `global connected_clients`.
+4. `uvicorn.run(app, ...)` with the app **object**, not the string
+   `"hvac_backend:app"` — the string form double-loads the module and crashes
+   on GPIO PWM re-init.
+5. Static mount present, absolute path:
+   `app.mount("/", StaticFiles(directory="/home/mark/hvac/dashboard/build", html=True), name="dashboard")`
+6. Seat-heater PWM init wrapped in `try: GPIO.cleanup(pin) except: pass`.
+7. DS18B20 IDs without the `28-` prefix.
 
 ---
 
 ## Troubleshooting
 
-**Dashboard doesn't load after reboot:**
-- Check if backend is running: `sudo systemctl status hvac`
-- Check logs: `journalctl -u hvac --since today`
-- Try manually: `cd /home/pi/hvac && python3 hvac_backend.py`
+**Dashboard blank, splash showing.** The kiosk polls the backend before
+launching Chromium. Check `systemctl status hvac-backend` and
+`tail ~/hvac/kiosk.log`.
 
-**"SIMULATION mode" when hardware is connected:**
-- Ensure I²C is enabled: `sudo raspi-config` → Interface Options → I²C
-- Ensure 1-Wire is enabled: `sudo raspi-config` → Interface Options → 1-Wire
-- Reboot after enabling interfaces
-- Check I²C: `i2cdetect -y 1`
-- Check 1-Wire: `ls /sys/bus/w1/devices/`
+**Screens swapped.** `wlr-randr` to see which connector is which, then
+`setup-displays.sh` — do not hand-edit `rc.xml`.
 
-**Display resolution wrong:**
-- Check config: `cat /boot/firmware/config.txt | grep hdmi`
-- Try `tvservice -s` to see current mode
-- Some 1920×720 panels need `hdmi_timings` instead of `hdmi_cvt` — check your panel's spec sheet
+**SIMULATION mode with hardware attached.** I²C or 1-Wire not enabled
+(`raspi-config` → Interface Options), or `RPi.GPIO` missing. `i2cdetect -y 1`
+and `ls /sys/bus/w1/devices/`.
 
-**Touch not working:**
-- Most USB touch panels work out of the box on Pi OS Bookworm
-- Check `dmesg | grep -i touch` for detection
-- If using a custom touch controller, you may need `xinput` calibration
+**Flap will not move.** Check `FLAP_HELD` in `hvac_backend.py` — it is a
+deliberate code-level hold, not a runtime toggle. Then check
+`<flap>_flap_fault` in state: `FLAP_MAX_DRIVE_S` cuts a motor that drives 8 s
+without progress.
 
-**Node-RED conflict:**
-- If Node-RED is still running, it may fight for GPIO access
-- Disable it: `sudo systemctl disable nodered && sudo systemctl stop nodered`
+**Wi-Fi wants a passphrase.** There is no on-screen prompt any more — the panel
+that drew it is disabled. `nmcli device wifi connect <SSID> --ask` over SSH.

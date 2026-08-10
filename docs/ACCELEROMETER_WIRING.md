@@ -158,9 +158,12 @@ g             = (v_measured - zero_v) / volts_per_g
 ```
 
 Doing all three axes gives a proper 6-point tumble calibration. Put the
-resulting constants in `hvac_backend.py` next to the existing ADC scaling
-(`ADC_MV_MIN` / `ADC_MV_MAX`), and keep the raw values — recalibrate if the
-sensor is ever remounted.
+resulting constants in `hvac_backend.py` next to the accelerometer block, and
+keep the raw values — recalibrate if the sensor is ever remounted.
+
+(This used to point at `ADC_MV_MIN` / `ADC_MV_MAX`. Those were a single global
+mV scale for all three flaps; they were superseded by per-flap `FLAP_CAL` and
+have been deleted.)
 
 ---
 

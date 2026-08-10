@@ -38,7 +38,7 @@ the car's touchscreen, your Mac browser, your phone — and they all stay in syn
 /home/mark/hvac/
 ├── hvac_backend.py          ← THE BRAIN (Python)
 ├── hvac_state.json          ← Your saved settings (auto-created)
-├── kiosk.sh                 ← Kiosk screen on/off script
+├── deploy/                  ← Setup scripts + bench tools (flap-pulse.py etc.)
 └── dashboard/
     ├── src/
     │   ├── HVACDashboard.jsx   ← THE FACE (edit this for UI changes)
@@ -78,30 +78,33 @@ rm ~/hvac/hvac_state.json
 
 ## 4. HOW TO START AND STOP IT
 
-### Start it (manual, for testing):
-```bash
-cd ~/hvac
-python3 hvac_backend.py
-```
-Leave that terminal open. You'll see live log lines as things happen.
+It starts itself. The backend is a **systemd service** called `hvac-backend`
+that comes up at boot and restarts itself if it ever crashes. You don't launch
+it, and normally you don't stop it either.
 
-### Stop it:
-Press **Ctrl+C** in that terminal.
-
-### Start it in the background (terminal can be closed):
 ```bash
-cd ~/hvac && python3 hvac_backend.py &
+sudo systemctl restart hvac-backend    # after changing the backend
+sudo systemctl stop hvac-backend       # only for bench work with flap-pulse.py
+sudo systemctl start hvac-backend
+systemctl is-active hvac-backend       # "active" = running
+journalctl -u hvac-backend -f          # live logs, Ctrl+C to stop watching
 ```
 
-### Kill a background copy:
+### Two things never to do
+
 ```bash
-pkill -f hvac_backend
+python3 hvac_backend.py     # ← NO. The service already has port 8000 and the
+                            #    GPIO. A second copy gives you
+                            #    "A PWM object already exists".
+pkill -f hvac_backend       # ← NO. Over SSH that pattern matches your own
+                            #    shell and kills your session. Use systemctl.
 ```
+
+If something really is stuck holding the port: `sudo fuser -k 8000/tcp`.
 
 ### View the dashboard:
-- On the Pi: Chromium → `http://localhost:8000`
+- On the Pi: it's already fullscreen on the bar screen at boot
 - From your Mac: any browser → `http://192.168.1.142:8000`
-- Kiosk fullscreen on the car display: `~/hvac/kiosk.sh on` (off to exit)
 
 ---
 
@@ -120,10 +123,10 @@ scp /Users/markpelosi/Downloads/HVACDashboard_2.jsx mark@192.168.1.142:/home/mar
 
 3. **Rebuild + restart** — SSH to the Pi:
 ```bash
-ssh mark@192.168.1.142
+ssh pi944
+cd ~/hvac && git pull
 cd ~/hvac/dashboard && npm run build        # takes 1-2 min
-pkill -f hvac_backend                        # stop old copy if running
-cd ~/hvac && python3 hvac_backend.py
+sudo systemctl restart hvac-backend
 ```
 
 4. **Hard-refresh** the browser: **Cmd+Shift+R** (this skips the cache —
@@ -131,16 +134,17 @@ cd ~/hvac && python3 hvac_backend.py
 
 ### B) Backend change (the brain — new IO, logic, tuning)
 
-1. Download from Claude, then from the Mac:
+1. Commit and push on the Mac:
 ```bash
-scp /Users/markpelosi/Downloads/hvac_backend.py mark@192.168.1.142:/home/mark/hvac/hvac_backend.py
+cd ~/Downloads/944_HVAC_repo
+git add -A && git commit -m "what changed" && git push origin main
 ```
 
-2. Restart it (NO rebuild needed — Python isn't compiled):
+2. Pull and restart (NO rebuild needed — Python isn't compiled):
 ```bash
-ssh mark@192.168.1.142
-pkill -f hvac_backend
-cd ~/hvac && python3 hvac_backend.py
+ssh pi944
+cd ~/hvac && git pull
+sudo systemctl restart hvac-backend
 ```
 
 ### Cheat table
@@ -242,21 +246,30 @@ CH3 = spare. Scaling: 225 mV = 0%, 4090 mV = 100%.
 
 ---
 
-## 10. MAKING IT START AUTOMATICALLY AT BOOT (when ready for the car)
+## 10. WHAT HAPPENS AT BOOT
 
-Right now you start it by hand — good for bench testing. When it goes in the
-car, enable the systemd service so it survives every ignition cycle:
+This is already set up — nothing to enable. Key on and:
 
-```bash
-sudo systemctl enable hvac     # start at every boot
-sudo systemctl start hvac      # start right now
-journalctl -u hvac -f          # watch live logs
+```
+0s    power on
+~2s   kernel, 944S splash on both screens
+~9s   hvac-backend starts, settings restored from hvac_state.json
+~19s  dashboard fullscreen on the bar, clock on the round gauge
 ```
 
-And turn the touchscreen kiosk back on:
-```bash
-~/hvac/kiosk.sh on
-```
+No keyboard, ever. No Pi rainbow, no raspberries, no taskbar, no mouse pointer
+and no notification popups — all of that is deliberately suppressed, and how is
+in `DISPLAYS_AND_BOOT.md`.
 
-From then on: key on → Pi boots → backend starts → settings restored from
-hvac_state.json → kiosk opens the dashboard. No keyboard needed, ever.
+If it ever takes ~70 s instead of ~19 s, something has given `hvac-backend`
+a `network-online.target` dependency again. That waits a full minute for Wi-Fi
+that the car doesn't have.
+
+Re-provisioning after a fresh SD card:
+```bash
+cd ~/hvac
+bash deploy/install.sh                          # service + kiosk autostart
+bash deploy/setup-displays.sh                   # pin each screen to its job
+sudo bash deploy/boot-splash/install-splash.sh  # splash, wallpaper, no cursor
+sudo reboot
+```

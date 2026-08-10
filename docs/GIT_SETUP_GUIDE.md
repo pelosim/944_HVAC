@@ -162,7 +162,7 @@ cd ~/hvac
 git add .
 git commit -m "New dashboard layout"
 git push
-pkill -f hvac_backend && python3 hvac_backend.py
+sudo systemctl restart hvac-backend
 ```
 
 Now GitHub has every version. No more `_2`, `_3`, `_FIXED` files piling up.
