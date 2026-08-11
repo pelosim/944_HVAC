@@ -312,11 +312,13 @@ function SysNode({ x, y, w = 250, h = 64, title, sub, st }) {
     <g>
       <rect x={x} y={y} width={w} height={h} rx={7} fill="#0C1416"
         stroke={col} strokeWidth={st === S_BAD ? 3 : 2} />
-      <text x={x + w / 2} y={y + (sub ? 28 : 40)} textAnchor="middle"
+      {/* Centred on the box rather than pinned near its top, so the one
+          tall node (the Pi) is not top-heavy against every short one. */}
+      <text x={x + w / 2} y={y + h / 2 + (sub ? -4 : 8)} textAnchor="middle"
         fontFamily="'Orbitron',monospace" fontSize={23} fontWeight={700}
         fill={st === S_UNK ? C.mid : C.text}>{title}</text>
       {sub && (
-        <text x={x + w / 2} y={y + 50} textAnchor="middle"
+        <text x={x + w / 2} y={y + h / 2 + 18} textAnchor="middle"
           fontFamily="'Rajdhani',sans-serif" fontSize={18} fill={col}>{sub}</text>
       )}
     </g>
@@ -810,9 +812,14 @@ function SystemStatus({ st, onClose }) {
       <svg viewBox="0 0 1920 720" width="100%" height="100%"
         role="img" aria-label="System status: link topology">
         <defs>
-          <marker id="sysArrow" markerWidth="8" markerHeight="8" refX="7" refY="3"
-            orient="auto" markerUnits="strokeWidth">
-            <path d="M0,0 L0,6 L7,3 z" fill="context-stroke" />
+          {/* userSpaceOnUse, NOT strokeWidth. With markerUnits="strokeWidth"
+              the arrowhead scales with the line, so fault links (stroke 5)
+              grew visibly bigger heads than healthy ones (stroke 3) — the
+              weight was doing the emphasis twice and the arrows read as
+              inconsistent. Now the line weight varies and the head does not. */}
+          <marker id="sysArrow" markerWidth="13" markerHeight="13" refX="11" refY="6.5"
+            orient="auto" markerUnits="userSpaceOnUse">
+            <path d="M2,1.5 L2,11.5 L11,6.5 z" fill="context-stroke" />
           </marker>
         </defs>
 
@@ -832,66 +839,86 @@ function SystemStatus({ st, onClose }) {
           {nOk} OK - {nUnk} NO FEEDBACK PATH
         </text>
 
-        {/* links */}
-        <SysLink d="M296,146 L336,146"   st={L.can}    label="CAN"  lx={316} ly={136} />
-        <SysLink d="M596,146 L636,146"   st={L.ir}     label="IR"   lx={616} ly={136} />
-        <SysLink d="M466,178 L466,246"   st={L.uart}   label="UART" lx={506} ly={220} />
-        <SysLink d="M596,286 L636,250"   st={L.hw} />
-        <SysLink d="M596,306 L636,330"   st={L.panel} />
-        <SysLink d="M596,326 L636,410"   st={L.aux} />
-        <SysLink d="M466,350 L466,556"   st={L.light}  label="USB"  lx={504} ly={470} />
-        <SysLink d="M596,330 L636,494"   st={L.bridge} />
-        <SysLink d="M896,522 L936,522"   st={L.hid}    label="HID"  lx={916} ly={506} />
-        <SysLink d="M886,410 L936,410"   st={L.accel}  label="I2C"  lx={911} ly={396} />
-        <SysLink d="M1456,522 L1196,522" st={L.ms3}    label="FTDI" lx={1326} ly={506} />
-        <SysLink d="M296,588 L336,588"   st={L.espnow} label="NOW"  lx={316} ly={578} />
-        <SysLink d="M596,588 L636,588"   st={L.light} />
-        <SysLink d="M286,272 L336,268"   st={L.bveh}   label="VEH" lx={311} ly={258} />
-        <SysLink d="M286,306 L336,330"   st={L.byaw}   label="YAW" lx={311} ly={324} />
-        <SysLink d="M286,428 L336,348"   st={L.steer}  label="CAN" lx={300} ly={412} />
+        {/* ── links ──
+            Every path is orthogonal: horizontal and vertical runs only, with
+            elbows. Diagonals made the four Pi outputs read as a fan of
+            unrelated strokes and hid which node each one landed on.
 
-        {/* nodes */}
-        <SysNode x={46}   y={114} title="iDRIVE KNOB"   st={L.can} />
-        <SysNode x={336} y={114} w={260} title="iDRIVE ESP32"
+            The four Pi -> right-column links share the 120px channel between
+            the columns, each on its own vertical lane (636/656/676/696) and
+            leaving the Pi at its own height. Lanes and exits are ordered so
+            no two runs cross. */}
+        <SysLink d="M276,144 H356"                st={L.can}    label="CAN"  lx={316}  ly={132} />
+        <SysLink d="M616,144 H736"                st={L.ir}     label="IR"   lx={676}  ly={132} />
+        <SysLink d="M486,176 V244"                st={L.uart}   label="UART" lx={524}  ly={214} />
+
+        <SysLink d="M276,266 H356"                st={L.bveh}   label="VEH"  lx={316}  ly={254} />
+        <SysLink d="M276,290 H356"                st={L.byaw}   label="YAW"  lx={316}  ly={312} />
+        <SysLink d="M276,404 H396 V356"           st={L.steer}  label="CAN"  lx={332}  ly={392} />
+
+        <SysLink d="M616,256 H696 V244 H736"      st={L.hw} />
+        <SysLink d="M616,284 H676 V324 H736"      st={L.panel} />
+        <SysLink d="M616,312 H656 V404 H736"      st={L.aux} />
+        <SysLink d="M616,340 H636 V516 H736"      st={L.bridge} />
+
+        <SysLink d="M486,356 V564"                st={L.light}  label="USB"  lx={524}  ly={470} />
+        <SysLink d="M966,404 H996"                st={L.accel}  label="I2C"  lx={981}  ly={390} />
+        <SysLink d="M966,516 H996"                st={L.hid}    label="HID"  lx={981}  ly={502} />
+        <SysLink d="M1456,516 H1196"              st={L.ms3}    label="FTDI" lx={1326} ly={502} />
+
+        <SysLink d="M276,596 H356"                st={L.espnow} label="NOW"  lx={316}  ly={584} />
+        <SysLink d="M616,596 H736"                st={L.light} />
+
+        {/* ── nodes ──
+            Four columns on a fixed grid (46 / 356 / 736 / 996) and rows on a
+            regular pitch, so alignment is structural rather than eyeballed
+            per node. */}
+        <SysNode x={46}   y={112} w={230} title="iDRIVE KNOB"  st={L.can} />
+        <SysNode x={356}  y={112} w={260} title="iDRIVE ESP32"
           sub={st.idriveOnline ? ageText(st.idriveAge)
                : st.idriveAge < 0 ? "no heartbeat" : "silent"} st={L.uart} />
-        <SysNode x={636}  y={114} title="HEAD UNIT"     st={L.ir} />
+        <SysNode x={736}  y={112} w={230} title="HEAD UNIT"    st={L.ir} />
+
         {/* Brake comms: two buses drawn separately, because they fail
             separately and behave differently in a latched fault — 0x38E keeps
             reporting position while 0x39D stays pinned at its sentinel. A
             single lumped link would hide exactly the case worth seeing. */}
-        <SysNode x={46}   y={254} w={240} title="iBOOSTER"
+        <SysNode x={46}   y={244} w={230} title="iBOOSTER"
           sub={st.brakeStatus === 2 ? "FAULT latched - assist off"
                : L.boost === S_OK ? `${st.brakeStrokeMm.toFixed(1)} mm - assisting`
                : (st.boosterVehAge < 0 && st.boosterYawAge < 0) ? "not connected"
                : !st.boosterVehOnline && !st.boosterYawOnline ? "both buses silent"
                : `can-${st.boosterVehOnline ? "yaw" : "veh"} silent`}
           st={L.boost} />
-        <SysNode x={46}   y={396} w={240} title="PRIUS EPS"
-          sub={st.steerOnline ? `${st.steerIdsSeen} ids - undecoded` : "not fitted"}
-          st={L.steer} />
-        <SysNode x={336}  y={246} w={260} h={104} title="HVAC Pi"
+        <SysNode x={356}  y={244} w={260} h={112} title="HVAC Pi"
           sub={`up ${Math.floor(st.uptime / 3600)}h ${Math.floor((st.uptime % 3600) / 60)}m`}
           st={S_OK} />
-        <SysNode x={636} y={218} title="HVAC HARDWARE"
+
+        <SysNode x={736}  y={212} w={230} title="HVAC HARDWARE"
           sub={st.flapsHeld ? `${st.flapsHeld} flap held` : undefined}
           st={st.flapsHeld ? S_UNK : L.hw} />
-        <SysNode x={636}  y={298} title="TOUCHSCREEN"   st={L.panel} />
-        <SysNode x={636}  y={378} title="AUX SCREEN"    st={L.aux} />
-        <SysNode x={636}  y={490} w={260} title="DASH BRIDGE"
-          sub={st.tsdashOnline ? ageText(st.tsdashAge) : "offline"} st={L.bridge} />
-        <SysNode x={936}  y={490} w={260} title="TSDASH Pi"
-          sub={L.hid === S_OK ? "host up" : L.hid === S_BAD ? "no host - usb:0" : "unknown"}
-          st={L.hid} />
-        <SysNode x={1456} y={490} title="MS3-PRO EVO"   st={L.ms3} />
-        <SysNode x={936} y={378} w={260} title="G-METER"
+        <SysNode x={736}  y={292} w={230} title="TOUCHSCREEN"  st={L.panel} />
+        <SysNode x={736}  y={372} w={230} title="AUX SCREEN"   st={L.aux} />
+        <SysNode x={996}  y={372} w={200} title="G-METER"
           sub={st.accelOk ? `${st.gLat >= 0 ? "+" : ""}${st.gLat.toFixed(2)} lat`
                : st.accelBad ? `axis ${st.accelBad.toUpperCase()} open` : "absent"}
           st={L.accel} />
-        <SysNode x={46}   y={556} title="LIGHT KNOB"    st={L.espnow} />
-        <SysNode x={336}  y={556} w={260} title="LIGHT ESP32"
+
+        <SysNode x={46}   y={372} w={230} title="PRIUS EPS"
+          sub={st.steerOnline ? `${st.steerIdsSeen} ids - undecoded` : "not fitted"}
+          st={L.steer} />
+
+        <SysNode x={736}  y={484} w={230} title="DASH BRIDGE"
+          sub={st.tsdashOnline ? ageText(st.tsdashAge) : "offline"} st={L.bridge} />
+        <SysNode x={996}  y={484} w={200} title="TSDASH Pi"
+          sub={L.hid === S_OK ? "host up" : L.hid === S_BAD ? "no host - usb:0" : "unknown"}
+          st={L.hid} />
+        <SysNode x={1456} y={484} w={230} title="MS3-PRO EVO"  st={L.ms3} />
+
+        <SysNode x={46}   y={564} w={230} title="LIGHT KNOB"   st={L.espnow} />
+        <SysNode x={356}  y={564} w={260} title="LIGHT ESP32"
           sub={st.illumOnline ? ageText(st.illumAge) : "offline"} st={L.light} />
-        <SysNode x={636}  y={556} title="LED LOADS"     st={L.light} />
+        <SysNode x={736}  y={564} w={230} title="LED LOADS"    st={L.light} />
 
         {/* needs-attention rail */}
         <line x1="1236" y1="120" x2="1236" y2="452" stroke={C.dim} strokeWidth="2" />
