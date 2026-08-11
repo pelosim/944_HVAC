@@ -1247,9 +1247,30 @@ class HVACController:
             step = 1 if action == "HVAC_MODE_NEXT" else -1
             cmd["vent_mode"] = order[(i + step) % len(order)]
         elif action == "SYSTEM_TOGGLE":
-            # BACK button. Global, not a mode: the status page is read-only, so
-            # the knob keeps doing whatever it was doing while you look at it.
-            cmd["system_view"] = "toggle"
+            # BACK button. Global, not a mode: every screen it reaches is
+            # read-only or self-contained, so the knob keeps doing whatever it
+            # was bound to while you look.
+            #
+            # This CYCLES all four screens rather than toggling SYSTEM, because
+            # there is no spare input left to put a cycle on: MEDIA/MENU/MAP/
+            # NAV/OPTION are mode selects, COM is AUX_SWAP, and GAUGE_* is
+            # deliberately reserved for the aux gauge cluster.
+            #
+            # The cost is real and worth stating: BACK used to be "one button
+            # in, same button out" for the status page. In a four-way cycle
+            # nothing can be one press in and one press out, so what it buys
+            # is reaching brake and steering from the knob at all. Restoring
+            # the instant peek needs a firmware change — a long-press action
+            # on BACK — not a backend one.
+            order = ["hvac", "brake", "steer", "system"]
+            cur = "system" if self.state.system_view else self.state.main_screen
+            i = order.index(cur) if cur in order else 0
+            nxt = order[(i + 1) % len(order)]
+            # Entering SYSTEM leaves main_screen alone, so leaving it returns
+            # to the screen you were on rather than jumping to HVAC.
+            cmd["system_view"] = (nxt == "system")
+            if nxt != "system":
+                cmd["main_screen"] = nxt
         elif action == "AUX_SWAP":
             # Dedicated button: swap the round screen clock <-> G-meter.
             cmd["aux_display"] = "gmeter" if self.state.aux_display == "clock" else "clock"
