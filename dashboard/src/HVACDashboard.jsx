@@ -121,8 +121,8 @@ function Lamp({ label, on, color = C.green, blink = false }) {
         animation: on && blink ? "pulse 1s ease-in-out infinite" : "none",
       }} />
       <span style={{
-        fontFamily: "'Rajdhani',sans-serif", fontSize: 18, fontWeight: 700,
-        letterSpacing: 1.8, color: on ? C.text : C.dim, whiteSpace: "nowrap",
+        fontFamily: "'Rajdhani',sans-serif", fontSize: 17, fontWeight: 700,
+        letterSpacing: 1.1, color: on ? C.text : C.dim, whiteSpace: "nowrap",
       }}>{label}</span>
     </div>
   );
@@ -844,40 +844,44 @@ function SystemStatus({ st, onClose }) {
             elbows. Diagonals made the four Pi outputs read as a fan of
             unrelated strokes and hid which node each one landed on.
 
-            The four Pi -> right-column links share the 120px channel between
-            the columns, each on its own vertical lane (636/656/676/696) and
+            The four Pi -> right-column links share the 100px channel between
+            the columns, each on its own vertical lane (616/636/656/676) and
             leaving the Pi at its own height. Lanes and exits are ordered so
             no two runs cross. */}
-        <SysLink d="M276,144 H356"                st={L.can}    label="CAN"  lx={316}  ly={132} />
-        <SysLink d="M616,144 H736"                st={L.ir}     label="IR"   lx={676}  ly={132} />
-        <SysLink d="M486,176 V244"                st={L.uart}   label="UART" lx={524}  ly={214} />
+        <SysLink d="M276,144 H346"                st={L.can}    label="CAN"  lx={311}  ly={132} />
+        <SysLink d="M596,144 H696"                st={L.ir}     label="IR"   lx={646}  ly={132} />
+        <SysLink d="M471,176 V244"                st={L.uart}   label="UART" lx={509}  ly={214} />
 
-        <SysLink d="M276,266 H356"                st={L.bveh}   label="VEH"  lx={316}  ly={254} />
-        <SysLink d="M276,290 H356"                st={L.byaw}   label="YAW"  lx={316}  ly={312} />
+        <SysLink d="M276,266 H346"                st={L.bveh}   label="VEH"  lx={311}  ly={254} />
+        <SysLink d="M276,290 H346"                st={L.byaw}   label="YAW"  lx={311}  ly={312} />
         <SysLink d="M276,404 H396 V356"           st={L.steer}  label="CAN"  lx={332}  ly={392} />
 
-        <SysLink d="M616,256 H696 V244 H736"      st={L.hw} />
-        <SysLink d="M616,284 H676 V324 H736"      st={L.panel} />
-        <SysLink d="M616,312 H656 V404 H736"      st={L.aux} />
-        <SysLink d="M616,340 H636 V516 H736"      st={L.bridge} />
+        <SysLink d="M596,256 H676 V244 H696"      st={L.hw} />
+        <SysLink d="M596,284 H656 V324 H696"      st={L.panel} />
+        <SysLink d="M596,312 H636 V404 H696"      st={L.aux} />
+        <SysLink d="M596,340 H616 V516 H696"      st={L.bridge} />
 
-        <SysLink d="M486,356 V564"                st={L.light}  label="USB"  lx={524}  ly={470} />
+        <SysLink d="M471,356 V564"                st={L.light}  label="USB"  lx={509}  ly={470} />
         <SysLink d="M966,404 H996"                st={L.accel}  label="I2C"  lx={981}  ly={390} />
         <SysLink d="M966,516 H996"                st={L.hid}    label="HID"  lx={981}  ly={502} />
         <SysLink d="M1456,516 H1196"              st={L.ms3}    label="FTDI" lx={1326} ly={502} />
 
-        <SysLink d="M276,596 H356"                st={L.espnow} label="NOW"  lx={316}  ly={584} />
-        <SysLink d="M616,596 H736"                st={L.light} />
+        <SysLink d="M276,596 H346"                st={L.espnow} label="NOW"  lx={311}  ly={584} />
+        <SysLink d="M596,596 H696"                st={L.light} />
 
         {/* ── nodes ──
-            Four columns on a fixed grid (46 / 356 / 736 / 996) and rows on a
-            regular pitch, so alignment is structural rather than eyeballed
-            per node. */}
+            Four columns on a fixed grid (46 / 346 / 696 / 996) and rows on a
+            regular pitch, so alignment is structural rather than eyeballed.
+
+            Column widths are set by the LONGEST label each column carries, not
+            by symmetry: "HVAC HARDWARE" is 13 characters of Orbitron and was
+            filling a 230-wide box edge to edge with no breathing room. That
+            column is 270; the others are sized to their own worst case. */}
         <SysNode x={46}   y={112} w={230} title="iDRIVE KNOB"  st={L.can} />
-        <SysNode x={356}  y={112} w={260} title="iDRIVE ESP32"
+        <SysNode x={346}  y={112} w={250} title="iDRIVE ESP32"
           sub={st.idriveOnline ? ageText(st.idriveAge)
                : st.idriveAge < 0 ? "no heartbeat" : "silent"} st={L.uart} />
-        <SysNode x={736}  y={112} w={230} title="HEAD UNIT"    st={L.ir} />
+        <SysNode x={696}  y={112} w={270} title="HEAD UNIT"    st={L.ir} />
 
         {/* Brake comms: two buses drawn separately, because they fail
             separately and behave differently in a latched fault — 0x38E keeps
@@ -890,15 +894,15 @@ function SystemStatus({ st, onClose }) {
                : !st.boosterVehOnline && !st.boosterYawOnline ? "both buses silent"
                : `can-${st.boosterVehOnline ? "yaw" : "veh"} silent`}
           st={L.boost} />
-        <SysNode x={356}  y={244} w={260} h={112} title="HVAC Pi"
+        <SysNode x={346}  y={244} w={250} h={112} title="HVAC Pi"
           sub={`up ${Math.floor(st.uptime / 3600)}h ${Math.floor((st.uptime % 3600) / 60)}m`}
           st={S_OK} />
 
-        <SysNode x={736}  y={212} w={230} title="HVAC HARDWARE"
+        <SysNode x={696}  y={212} w={270} title="HVAC HARDWARE"
           sub={st.flapsHeld ? `${st.flapsHeld} flap held` : undefined}
           st={st.flapsHeld ? S_UNK : L.hw} />
-        <SysNode x={736}  y={292} w={230} title="TOUCHSCREEN"  st={L.panel} />
-        <SysNode x={736}  y={372} w={230} title="AUX SCREEN"   st={L.aux} />
+        <SysNode x={696}  y={292} w={270} title="TOUCHSCREEN"  st={L.panel} />
+        <SysNode x={696}  y={372} w={270} title="AUX SCREEN"   st={L.aux} />
         <SysNode x={996}  y={372} w={200} title="G-METER"
           sub={st.accelOk ? `${st.gLat >= 0 ? "+" : ""}${st.gLat.toFixed(2)} lat`
                : st.accelBad ? `axis ${st.accelBad.toUpperCase()} open` : "absent"}
@@ -908,7 +912,7 @@ function SystemStatus({ st, onClose }) {
           sub={st.steerOnline ? `${st.steerIdsSeen} ids - undecoded` : "not fitted"}
           st={L.steer} />
 
-        <SysNode x={736}  y={484} w={230} title="DASH BRIDGE"
+        <SysNode x={696}  y={484} w={270} title="DASH BRIDGE"
           sub={st.tsdashOnline ? ageText(st.tsdashAge) : "offline"} st={L.bridge} />
         <SysNode x={996}  y={484} w={200} title="TSDASH Pi"
           sub={L.hid === S_OK ? "host up" : L.hid === S_BAD ? "no host - usb:0" : "unknown"}
@@ -916,9 +920,9 @@ function SystemStatus({ st, onClose }) {
         <SysNode x={1456} y={484} w={230} title="MS3-PRO EVO"  st={L.ms3} />
 
         <SysNode x={46}   y={564} w={230} title="LIGHT KNOB"   st={L.espnow} />
-        <SysNode x={356}  y={564} w={260} title="LIGHT ESP32"
+        <SysNode x={346}  y={564} w={250} title="LIGHT ESP32"
           sub={st.illumOnline ? ageText(st.illumAge) : "offline"} st={L.light} />
-        <SysNode x={736}  y={564} w={230} title="LED LOADS"    st={L.light} />
+        <SysNode x={696}  y={564} w={270} title="LED LOADS"    st={L.light} />
 
         {/* needs-attention rail */}
         <line x1="1236" y1="120" x2="1236" y2="452" stroke={C.dim} strokeWidth="2" />
@@ -1396,7 +1400,8 @@ export default function HVACDashboard() {
 
         {/* ════ BAND 1 — HEADER RAIL ════ */}
         <div className="band" style={{
-          display: "flex", alignItems: "center", gap: 26, padding: "0 28px",
+          display: "flex", alignItems: "center", gap: 14, padding: "0 22px",
+          overflow: "hidden",
           background: `linear-gradient(180deg, ${C.fasciaHi}, ${C.fascia})`,
           borderBottom: `1px solid ${C.lineHi}`,
           boxShadow: "0 3px 12px rgba(0,0,0,0.5)",
@@ -1430,7 +1435,7 @@ export default function HVACDashboard() {
                 const tint = alert ? C.red : C.vfd;
                 return (
                   <button key={o.k} onClick={() => cmdMainScreen(o.k)} style={{
-                    padding: "9px 13px", border: "none",
+                    padding: "9px 11px", border: "none",
                     background: on ? (alert ? "rgba(255,59,48,0.18)" : C.vfdDim) : "transparent",
                     color: alert ? C.red : on ? C.vfd : C.mid,
                     fontFamily: "'Rajdhani',sans-serif", fontSize: 20, fontWeight: 700,
@@ -1445,14 +1450,19 @@ export default function HVACDashboard() {
 
           <div style={{ flex: 1 }} />
 
-          {/* Annunciator lamps in header */}
-          <div style={{ display: "flex", gap: 20 }}>
+          {/* Annunciator lamps. flexShrink lives HERE and nowhere else in the
+              rail: the stage is a fixed 1920 and the fourth VIEW button pushed
+              the clock off the right edge. Making the lamp row the only thing
+              that gives means an overrun clips a lamp label, never a control
+              or the time. */}
+          <div style={{ display: "flex", gap: 13, flexShrink: 1,
+            minWidth: 0, overflow: "hidden" }}>
             <Lamp label="LINK" on={wsConnected} color={C.green} />
             <Lamp label="LOOP" on={controlActive} color={C.vfd} />
             <Lamp label="1-WIRE" on={onewireOk} color={C.green} />
             <Lamp label="ADC" on={adsOk} color={C.green} />
-            <Lamp label="HEAT VLV" on={heatValve} color={C.amber} />
-            <Lamp label="A/C CLU" on={acOn} color={C.ice} />
+            <Lamp label="HEAT" on={heatValve} color={C.amber} />
+            <Lamp label="A/C" on={acOn} color={C.ice} />
             <Lamp label="FLAP" on={anyFlapFault} color={C.red} blink />
             {/* Lights ONLY on a latched booster fault — visible from either
                 screen, because the fault outlives whatever page is showing. */}
@@ -1469,7 +1479,7 @@ export default function HVACDashboard() {
                 const on = auxDisplay === o.k;
                 return (
                   <button key={o.k} onClick={() => cmdAuxDisplay(o.k)} style={{
-                    padding: "9px 15px", border: "none",
+                    padding: "9px 12px", border: "none",
                     background: on ? C.vfdDim : "transparent",
                     color: on ? C.vfd : C.mid,
                     fontFamily: "'Rajdhani',sans-serif", fontSize: 19, fontWeight: 700,
@@ -1493,10 +1503,11 @@ export default function HVACDashboard() {
             animation: testOverride ? "pulse 1.6s ease-in-out infinite" : "none",
           }}>TEST</button>
 
-          <div style={{ width: 2, height: 36, background: C.line }} />
+          <div style={{ width: 2, height: 36, background: C.line, flexShrink: 0 }} />
 
           <span style={{ fontFamily: "'Orbitron',monospace", fontSize: 34, fontWeight: 700,
-            color: C.vfd, textShadow: `0 0 12px ${C.vfd}50`, fontVariantNumeric: "tabular-nums" }}>
+            color: C.vfd, textShadow: `0 0 12px ${C.vfd}50`, fontVariantNumeric: "tabular-nums",
+            whiteSpace: "nowrap", flexShrink: 0 }}>
             {time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
           </span>
         </div>
