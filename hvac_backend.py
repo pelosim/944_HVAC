@@ -1693,7 +1693,12 @@ def can_reader_loop(link: str):
             s.bind((iface,))
             s.settimeout(1.0)
             complained = False
-            log.info("CAN: %s up on %s", link, iface)
+            # Deliberately NOT logging "up" here: bind() succeeds on a DOWN
+            # interface, so this point proves nothing. The log used to say
+            # "canveh up on can-veh" and then "Network is down" on the very
+            # next line, which sent a real hotplug fault looking in the wrong
+            # place. Announce only once a frame has actually arrived.
+            announced = False
             while True:
                 try:
                     frame = s.recv(16)
@@ -1706,6 +1711,9 @@ def can_reader_loop(link: str):
                 mask = _CAN_EFF_MASK if can_id & _CAN_EFF_FLAG else _CAN_SFF_MASK
                 cid = can_id & mask
                 data = frame[8:8 + min(dlc, 8)]
+                if not announced:
+                    log.info("CAN: %s receiving on %s", link, iface)
+                    announced = True
                 _mark_rx(link)
 
                 with _can_lock:
@@ -1826,7 +1834,8 @@ def diagnose_can(link: str, facts: dict, flowing: bool, ever_seen: bool,
             return ("info", "adapter not fitted")
         return ("fault", f"{facts.get('iface', link)} missing — adapter unplugged?")
     if not facts.get("up"):
-        return ("fault", "interface down — sudo systemctl restart ibooster-can")
+        return ("fault", "interface DOWN — replug the USB, or "
+                         "sudo systemctl restart ibooster-can")
 
     state = facts.get("state", "?")
     if state == "BUS-OFF":
