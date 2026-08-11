@@ -1271,6 +1271,21 @@ class HVACController:
             cmd["system_view"] = (nxt == "system")
             if nxt != "system":
                 cmd["main_screen"] = nxt
+        elif action == "MODE_ENTER" and mode == "hvac":
+            # MENU (top-centre, easiest button to find by feel) was just
+            # PRESSED — MODE_ENTER fires only on the press, never on a knob
+            # turn while already in that mode, which is what makes this safe
+            # to hang a screen change on.
+            #
+            # This is the get-me-home button, and it is what lets BACK cycle
+            # all four screens without stranding anyone: however deep in the
+            # cycle you are, one press of MENU is back to climate control.
+            #
+            # Only HVAC does this. The other mode buttons have no
+            # corresponding screen, and pressing MAP to dim the lights should
+            # not yank you off the brake page.
+            cmd["main_screen"] = "hvac"
+            cmd["system_view"] = False
         elif action == "AUX_SWAP":
             # Dedicated button: swap the round screen clock <-> G-meter.
             cmd["aux_display"] = "gmeter" if self.state.aux_display == "clock" else "clock"
