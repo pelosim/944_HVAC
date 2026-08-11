@@ -246,6 +246,18 @@ BOOSTER_STALE_S = 2.0      # 0x39D arrives at 25 Hz — 2 s is 50 missed frames
 STEER_IFACE = "can-steer"          # third adapter — NOT PRESENT YET
 STEER_STALE_S = 2.0
 
+# --- Main screens ---------------------------------------------------
+# ONE list, used by both the command validator and the iDrive BACK cycle.
+# They were separate lists once and immediately drifted: "steer" was added
+# to the cycle but not the validator, so the command was silently dropped,
+# the dashboard showed the screen optimistically, and 800 ms later the
+# pending window expired and it snapped back. Add a screen here and both
+# paths learn about it together.
+#
+# SYSTEM is not in this list — it is a separate boolean because the iDrive
+# knob toggles it by name. The BACK cycle appends it.
+MAIN_SCREENS = ("hvac", "brake", "steer")
+
 # Every CAN link this process reads. Reader threads are identical; only the
 # per-ID decode below differs, and only for the two booster buses.
 CAN_IFACES = {"canveh": "can-veh", "canyaw": "can-yaw", "cansteer": STEER_IFACE}
@@ -1105,8 +1117,15 @@ class HVACController:
                                       if str(v).lower() == "toggle" else bool(v))
         if "main_screen" in cmd:
             screen = str(cmd["main_screen"]).lower()
-            if screen in ("hvac", "brake"):
+            if screen in MAIN_SCREENS:
                 self.state.main_screen = screen
+            else:
+                # Loud, because the symptom is deceptive: the dashboard shows
+                # the screen optimistically and then snaps back when its
+                # pending window expires, which looks like a UI bug rather
+                # than a rejected command.
+                log.warning("main_screen: rejected unknown screen %r (known: %s)",
+                            screen, ", ".join(MAIN_SCREENS))
         if "tsdash" in cmd:
             # Page the TunerStudio dash on the TSDash Pi. Nothing is stored:
             # this is a fire-and-forget keystroke, and there is no state here
@@ -1262,7 +1281,7 @@ class HVACController:
             # is reaching brake and steering from the knob at all. Restoring
             # the instant peek needs a firmware change — a long-press action
             # on BACK — not a backend one.
-            order = ["hvac", "brake", "steer", "system"]
+            order = list(MAIN_SCREENS) + ["system"]
             cur = "system" if self.state.system_view else self.state.main_screen
             i = order.index(cur) if cur in order else 0
             nxt = order[(i + 1) % len(order)]
