@@ -37,8 +37,27 @@ def load_from_backend():
     lighting_sent = []
     ns = {"dataclass": dataclass, "field": field, "asdict": asdict,
           "json": json, "time": time, "Optional": object,
-          "lighting_send": lighting_sent.append, "LIGHT_STEP": 8,
+          "lighting_send": lighting_sent.append,
+          "tsdash_send": lambda *_: None,
+          "log": type("L", (), {"warning": lambda *a, **k: None,
+                                "info": lambda *a, **k: None,
+                                "debug": lambda *a, **k: None})(),
           "_sent": lighting_sent}
+
+    # Pull module-level CONSTANTS out of the backend rather than listing
+    # them here. Hand-listing was the one drift vector left in a file whose
+    # whole point is not to drift, and it had already broken: VENT_MODE_ORDER
+    # was added to the backend and this file never learned about it, so
+    # Test 3 died with a NameError instead of testing anything. Anything
+    # ALL_CAPS and literal now arrives automatically.
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 \
+                and isinstance(node.targets[0], ast.Name) \
+                and node.targets[0].id.isupper():
+            try:
+                ns[node.targets[0].id] = ast.literal_eval(node.value)
+            except (ValueError, SyntaxError):
+                pass          # not a literal — nothing this harness needs
     exec(state_src, ns)
     # get_source_segment returns a ClassDef without its decorators, so the
     # extracted class arrives undecorated — reapply @dataclass by hand or
@@ -62,10 +81,15 @@ def load_from_backend():
          "    def _save_state(self):\n"
          "        self.saves += 1\n"
          + body, ns)
-    return ns["HVACState"], ns["Ctl"], lighting_sent
+    # Hand the extracted constants back too, so tests can assert against
+    # the real MAIN_SCREENS rather than a copy that would drift the same way
+    # the hand-listed ones did.
+    consts = {k: v for k, v in ns.items() if k.isupper()}
+    return ns["HVACState"], ns["Ctl"], lighting_sent, consts
 
 
-HVACState, Ctl, LIGHTING_SENT = load_from_backend()
+HVACState, Ctl, LIGHTING_SENT, BACKEND_CONSTS = load_from_backend()
+globals().update(BACKEND_CONSTS)
 
 failures = 0
 
@@ -218,6 +242,56 @@ c = new(); LIGHTING_SENT.clear()
 c.apply_idrive_event(evt("LIGHT_BRIGHTER", 5, mode="ILLUM"))
 check(c.state.illum_ch1 == 0,
       "illum_ch1 stays at its reported value - only the board sets it")
+
+# ── Screen cycling (BACK) and get-me-home (MENU) ──────────────────
+# This pair broke in service: main_screen:"steer" was rejected by a
+# validator that had never learned about the screen, so the dashboard showed
+# it optimistically and snapped back 800 ms later. A cycle that silently
+# refuses to reach one of its own stops is exactly the shape to test for.
+
+print("\nTest 14: BACK cycles every screen and returns home")
+c = new()
+seen = []
+for _ in range(len(MAIN_SCREENS) + 1):
+    c.apply_idrive_event(evt("SYSTEM_TOGGLE"))
+    seen.append("system" if c.state.system_view else c.state.main_screen)
+check(seen[:len(MAIN_SCREENS)] == list(MAIN_SCREENS[1:]) + ["system"],
+      f"walks {' -> '.join(MAIN_SCREENS[1:])} -> system, got {seen[:-1]}")
+check(seen[-1] == MAIN_SCREENS[0],
+      f"wraps back to {MAIN_SCREENS[0]}, got {seen[-1]}")
+check(set(seen) >= set(MAIN_SCREENS),
+      f"every screen reachable, missed {set(MAIN_SCREENS) - set(seen)}")
+
+print("\nTest 15: every screen the cycle emits is one the validator accepts")
+c = new()
+emitted = set()
+for _ in range(12):
+    c.apply_idrive_event(evt("SYSTEM_TOGGLE"))
+for cmd in c.commands:
+    if "main_screen" in cmd:
+        emitted.add(cmd["main_screen"])
+check(emitted <= set(MAIN_SCREENS),
+      f"cycle never names an unknown screen, emitted {sorted(emitted)}")
+check(emitted == set(MAIN_SCREENS),
+      f"cycle emits all of them, missing {set(MAIN_SCREENS) - emitted}")
+
+print("\nTest 16: MENU returns the display home from anywhere")
+for start in list(MAIN_SCREENS) + ["system"]:
+    c = new()
+    if start == "system":
+        c.state.system_view = True
+    else:
+        c.state.main_screen = start
+    c.apply_idrive_event(evt("MODE_ENTER", mode="hvac"))
+    check(c.state.main_screen == "hvac" and not c.state.system_view,
+          f"from {start} -> hvac")
+
+print("\nTest 17: other mode buttons leave the screen alone")
+for m in ("radio", "illum", "gauge", "tsdash"):
+    c = new()
+    c.state.main_screen = "brake"
+    c.apply_idrive_event(evt("MODE_ENTER", mode=m))
+    check(c.state.main_screen == "brake", f"{m} does not steal the screen")
 
 print(f"\n{'ALL TESTS PASSED' if not failures else 'FAILED'} "
       f"({failures} failure{'' if failures == 1 else 's'})")
