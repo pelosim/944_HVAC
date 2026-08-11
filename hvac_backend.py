@@ -276,8 +276,13 @@ BRAKE_STROKE_SENTINEL = 13700
 # does not clear it and assist stays off until the booster is power-cycled.
 # status==2 therefore means "assist unavailable", NOT "position invalid" —
 # after a reconnect 0x38E resumes live position while still reporting 2.
+# Derived from the 16-bit form in DECODE.md by masking the status nibble,
+# which subtracts a constant 4096 counts:
+#     mm = 0.015207 * (X12 + 4096) - 66.36  ->  0.015207 * X12 - 4.072
+# Sanity, and these are the numbers to check any edit against: rest 320 ->
+# 0.80 mm, full travel 3052 -> 42.34 mm.
 BRAKE_POS_SCALE  = 0.015207      # mm per count
-BRAKE_POS_OFFSET = 1.94
+BRAKE_POS_OFFSET = -4.072
 
 # --- Brake pressure sensors (ON ORDER — not yet fitted) ------------
 # Two transducers, one per hydraulic circuit. ADS channel audit 2026-08-10:
@@ -522,6 +527,10 @@ class HVACState:
     brake_stroke_mm: float = 0.0      # from 0x39D, checksum-validated
     brake_stroke_raw: int = -1        # raw counts; -1 = never seen
     brake_pos_yaw: int = -1           # 0x38E 12-bit position, cross-check
+    # Converted HERE, not in the dashboard. The scale/offset lived in both
+    # places and immediately diverged: the dashboard kept a stale +1.94 and
+    # showed 6.8 mm at rest against 0x39D's 0.8 mm.
+    brake_pos_yaw_mm: float = 0.0
     # 0 = unknown, 1 = healthy, 2 = FAULT (latched — power cycle to clear).
     # 2 means "assist unavailable", not "position invalid": after a sensor
     # reconnect the yaw position is live again while this still reads 2.
@@ -1441,6 +1450,9 @@ class HVACController:
         self.state.brake_stroke_raw = brake["stroke_raw"]
         self.state.brake_sentinel = brake["sentinel"]
         self.state.brake_pos_yaw = brake["pos_yaw"]
+        self.state.brake_pos_yaw_mm = (
+            round(BRAKE_POS_SCALE * brake["pos_yaw"] + BRAKE_POS_OFFSET, 2)
+            if brake["pos_yaw"] >= 0 else 0.0)
         # Hold status at its last value when the bus goes quiet rather than
         # resetting to unknown: the fault LATCHES in the booster, and a
         # latched fault with a flaky CAN lead is still a latched fault.

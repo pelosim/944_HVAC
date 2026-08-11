@@ -536,8 +536,21 @@ function BrakeScreen({ st }) {
   // latches, so "unknown" here really means "never heard from it".
   const noData = st.brakeStatus === 0;
   const fault = st.brakeStatus === 2;
-  const pct = Math.max(0, Math.min(100, (st.brakeStrokeMm / STROKE_FULL_MM) * 100));
-  const yawMm = st.brakePosYaw >= 0 ? 0.015207 * st.brakePosYaw + 1.94 : null;
+  const pct0 = (v) => Math.max(0, Math.min(100, (v / STROKE_FULL_MM) * 100));
+  // Backend converts this; the UI must not keep its own copy of the scale.
+  // It did, and the two diverged — a stale +1.94 here showed 6.8 mm at rest
+  // against 0x39D's 0.8 mm, on screen, for a whole session.
+  const yawMm = st.brakePosYaw >= 0 ? st.brakePosYawMm : null;
+
+  // 0x39D gone but 0x38E still reporting is a REAL operating state, not just
+  // a wiring fault: DECODE.md records that during a latched fault 0x39D pins
+  // to its sentinel while 0x38E keeps giving live position. Showing 0.0 mm
+  // with good data on the other bus would be throwing away the only reading
+  // available. Fall back — clearly labelled, never silently.
+  const vehDead = st.brakeStrokeRaw < 0 || st.brakeSentinel;
+  const usingYaw = vehDead && yawMm !== null && st.boosterYawOnline;
+  const shownMm = usingYaw ? yawMm : st.brakeStrokeMm;
+  const noStroke = vehDead && !usingYaw;
 
   const statusColor = noData ? C.dim : fault ? C.red : C.green;
   const panel = {
@@ -559,26 +572,33 @@ function BrakeScreen({ st }) {
     }}>
       {/* ── stroke ── */}
       <div style={{ ...panel, flex: "0 0 560px" }}>
-        {h("PEDAL STROKE · 0x39D")}
+        {h(usingYaw ? "PEDAL STROKE · 0x38E FALLBACK" : "PEDAL STROKE · 0x39D")}
         <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
           <span style={{ fontFamily: "'Orbitron',monospace", fontSize: 112,
             fontWeight: 800, lineHeight: 0.95, fontVariantNumeric: "tabular-nums",
-            color: st.brakeSentinel ? C.dim : C.vfd,
-            textShadow: st.brakeSentinel ? "none" : `0 0 22px ${C.vfd}55` }}>
-            {st.brakeSentinel ? "--" : st.brakeStrokeMm.toFixed(1)}
+            color: noStroke ? C.dim : usingYaw ? C.amber : C.vfd,
+            textShadow: noStroke ? "none"
+              : `0 0 22px ${usingYaw ? C.amber : C.vfd}55` }}>
+            {noStroke ? "--" : shownMm.toFixed(1)}
           </span>
           <span style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 30,
             fontWeight: 600, color: C.mid }}>mm</span>
         </div>
 
         {/* bar with end-stop tick */}
+        {usingYaw && (
+          <div style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 20,
+            fontWeight: 700, color: C.amber, marginTop: 4 }}>
+            0x39D unavailable — reading the YAW bus instead (coarser)</div>
+        )}
         <div style={{ position: "relative", height: 34, marginTop: 16,
           border: `1.5px solid ${C.line}`, borderRadius: 6, overflow: "hidden",
           background: C.segOff }}>
           <div style={{ position: "absolute", left: 0, top: 0, bottom: 0,
-            width: `${pct}%`,
-            background: `linear-gradient(90deg, ${C.vfd}30, ${C.vfd}88)`,
-            borderRight: pct > 1 ? `2px solid ${C.vfd}` : "none",
+            width: `${noStroke ? 0 : pct0(shownMm)}%`,
+            background: `linear-gradient(90deg, ${usingYaw ? C.amber : C.vfd}30, ${usingYaw ? C.amber : C.vfd}88)`,
+            borderRight: !noStroke && pct0(shownMm) > 1
+              ? `2px solid ${usingYaw ? C.amber : C.vfd}` : "none",
             transition: "width 0.12s linear" }} />
           <div style={{ position: "absolute", top: 0, bottom: 0,
             left: `${(STROKE_ENDSTOP_MM / STROKE_FULL_MM) * 100}%`,
@@ -1028,6 +1048,7 @@ export default function HVACDashboard() {
   const [brakeStrokeMm, setBrakeStrokeMm] = useState(0);
   const [brakeStrokeRaw, setBrakeStrokeRaw] = useState(-1);
   const [brakePosYaw, setBrakePosYaw] = useState(-1);
+  const [brakePosYawMm, setBrakePosYawMm] = useState(0);
   const [brakeStatus, setBrakeStatus] = useState(0);
   const [brakeSentinel, setBrakeSentinel] = useState(false);
   const [brakePressOk, setBrakePressOk] = useState(false);
@@ -1129,6 +1150,7 @@ export default function HVACDashboard() {
           apply("brake_stroke_mm", setBrakeStrokeMm);
           apply("brake_stroke_raw", setBrakeStrokeRaw);
           apply("brake_pos_yaw", setBrakePosYaw);
+          apply("brake_pos_yaw_mm", setBrakePosYawMm);
           apply("brake_status", setBrakeStatus);
           apply("brake_sentinel", setBrakeSentinel);
           apply("brake_press_ok", setBrakePressOk);
@@ -1347,7 +1369,7 @@ export default function HVACDashboard() {
         {!systemView && mainScreen === "brake" && (
           <BrakeScreen st={{
             boosterVehOnline, boosterYawOnline, boosterVehAge, boosterYawAge,
-            brakeStrokeMm, brakeStrokeRaw, brakePosYaw, brakeStatus,
+            brakeStrokeMm, brakeStrokeRaw, brakePosYaw, brakePosYawMm, brakeStatus,
             brakeSentinel, brakePressOk, brakePressFront, brakePressRear,
             canFrames,
           }} />
