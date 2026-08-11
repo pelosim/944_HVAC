@@ -427,25 +427,6 @@ function OutletButton({ label, icon, level, color, onPress }) {
 //   - a stroke past the end stop is the fault sentinel, never travel. The
 //     backend already zeroes it; this screen must not re-derive mm from raw.
 
-function BusDot({ label, online, age, hz }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-      <div style={{
-        width: 10, height: 10, borderRadius: "50%",
-        background: online ? C.green : C.red,
-        boxShadow: online ? `0 0 8px ${C.green}` : "none",
-      }} />
-      <span style={{ fontFamily: "'Orbitron',monospace", fontSize: 19,
-        fontWeight: 700, color: online ? C.text : C.red, letterSpacing: 1 }}>
-        {label}</span>
-      <span style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 19,
-        color: C.mid }}>
-        {online ? `${hz} Hz` : age < 0 ? "never seen" : `silent ${ageText(age)}`}
-      </span>
-    </div>
-  );
-}
-
 function PressTile({ label, ok, psi }) {
   return (
     <div style={{
@@ -620,11 +601,27 @@ function BrakeScreen({ st }) {
         </div>
 
         <div style={{ flex: 1 }} />
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <BusDot label="CAN-VEH" online={st.boosterVehOnline}
-            age={st.boosterVehAge} hz={25} />
-          <BusDot label="CAN-YAW" online={st.boosterYawOnline}
-            age={st.boosterYawAge} hz={100} />
+        {/* Diagnosis, not just a red dot. "Silent" was never the useful
+            part — which KIND of silent is, and the controller already knows.
+            See diagnose_can() in the backend. */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+          {(st.canHealth || []).filter((h) => h.bus !== "steer").map((h) => {
+            const col = h.level === "ok" ? C.green
+              : h.level === "warn" ? C.amber
+              : h.level === "info" ? C.dim : C.red;
+            return (
+              <div key={h.bus} style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+                <div style={{ width: 10, height: 10, borderRadius: "50%", flexShrink: 0,
+                  background: col, alignSelf: "center",
+                  boxShadow: h.level === "ok" ? `0 0 8px ${col}` : "none" }} />
+                <span style={{ fontFamily: "'Orbitron',monospace", fontSize: 19,
+                  fontWeight: 700, color: col, letterSpacing: 1, flexShrink: 0 }}>
+                  {h.label}</span>
+                <span style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 19,
+                  color: h.level === "ok" ? C.mid : C.text }}>{h.diag}</span>
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -730,8 +727,22 @@ function SteerScreen({ st }) {
         <div style={{ flex: 1 }} />
 
         <div style={{ borderTop: `1px solid ${C.line}`, paddingTop: 14 }}>
-          <BusDot label="CAN-STEER" online={st.steerOnline}
-            age={st.steerAge} hz="live" />
+          {(st.canHealth || []).filter((h) => h.bus === "steer").map((h) => {
+            const col = h.level === "ok" ? C.green
+              : h.level === "warn" ? C.amber
+              : h.level === "info" ? C.dim : C.red;
+            return (
+              <div key={h.bus} style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+                <div style={{ width: 10, height: 10, borderRadius: "50%", flexShrink: 0,
+                  background: col, alignSelf: "center" }} />
+                <span style={{ fontFamily: "'Orbitron',monospace", fontSize: 19,
+                  fontWeight: 700, color: col, letterSpacing: 1, flexShrink: 0 }}>
+                  {h.label}</span>
+                <span style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 19,
+                  color: C.text }}>{h.diag}</span>
+              </div>
+            );
+          })}
           <div style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 19,
             color: C.mid, marginTop: 10, lineHeight: 1.45 }}>
             {st.steerAge < 0
@@ -810,13 +821,17 @@ function SystemStatus({ st, onClose }) {
     flapFault ? "flap travel fault" : !st.onewireOk ? "1-Wire bus down" : "ADS1115 not answering"]);
   if (st.brakeStatus === 2) attention.push([C.red, "iBOOSTER",
     "fault LATCHED - assist off until ignition cycle"]);
-  else if (L.boost === S_BAD) attention.push([C.red, "Pi -> iBOOSTER",
-    !st.boosterVehOnline && !st.boosterYawOnline ? "both CAN buses silent"
-      : `can-${st.boosterVehOnline ? "yaw" : "veh"} silent`]);
+  // One line per unhealthy bus, naming the CAUSE rather than the symptom.
+  // "can-veh silent" was true and useless; it took a meter to turn into an
+  // action three separate times.
+  for (const h of (st.canHealth || [])) {
+    if (h.level === "ok" || h.level === "info") continue;
+    attention.push([h.level === "warn" ? C.amber : C.red, h.label, h.diag]);
+  }
   if (st.flapsHeld) attention.push([C.dim, "FLAP HELD",
     `${st.flapsHeld.toUpperCase()} not driven — awaiting recalibration`]);
   if (!st.steerOnline) attention.push([C.dim, "PRIUS EPS",
-    "can-steer not fitted - framework only, nothing decoded"]);
+    "framework only - nothing decoded on this bus"]);
   attention.push([C.dim, "HEAD UNIT - IR", "write-only, no feedback path"]);
   attention.push([C.dim, "MS3 -> TSDASH", "not visible from this Pi"]);
 
@@ -1055,6 +1070,7 @@ export default function HVACDashboard() {
   const [brakePressFront, setBrakePressFront] = useState(0);
   const [brakePressRear, setBrakePressRear] = useState(0);
   const [canFrames, setCanFrames] = useState([]);
+  const [canHealth, setCanHealth] = useState([]);
   const [steerOnline, setSteerOnline] = useState(false);
   const [steerAge, setSteerAge] = useState(-1);
   const [steerIdsSeen, setSteerIdsSeen] = useState(0);
@@ -1157,6 +1173,7 @@ export default function HVACDashboard() {
           apply("brake_press_front_psi", setBrakePressFront);
           apply("brake_press_rear_psi", setBrakePressRear);
           apply("can_frames", setCanFrames);
+          apply("can_health", setCanHealth);
           apply("steer_online", setSteerOnline);
           apply("steer_age_s", setSteerAge);
           apply("steer_ids_seen", setSteerIdsSeen);
@@ -1350,7 +1367,7 @@ export default function HVACDashboard() {
               accelOk, accelBad, gLat, gLon,
               mixFault: mixFlapFault, defFault: defrostFlapFault, footFault: footFlapFault,
               boosterVehOnline, boosterYawOnline, boosterVehAge, boosterYawAge,
-              brakeStatus, brakeStrokeMm, steerOnline, steerIdsSeen,
+              brakeStatus, brakeStrokeMm, steerOnline, steerIdsSeen, canHealth,
             }}
           />
         )}
@@ -1362,7 +1379,7 @@ export default function HVACDashboard() {
             VIEW switch that got you here — never leaves the screen. */}
         {!systemView && mainScreen === "steer" && (
           <SteerScreen st={{
-            steerOnline, steerAge, steerIdsSeen, canFrames,
+            steerOnline, steerAge, steerIdsSeen, canFrames, canHealth,
           }} />
         )}
 
@@ -1371,7 +1388,7 @@ export default function HVACDashboard() {
             boosterVehOnline, boosterYawOnline, boosterVehAge, boosterYawAge,
             brakeStrokeMm, brakeStrokeRaw, brakePosYaw, brakePosYawMm, brakeStatus,
             brakeSentinel, brakePressOk, brakePressFront, brakePressRear,
-            canFrames,
+            canFrames, canHealth,
           }} />
         )}
 

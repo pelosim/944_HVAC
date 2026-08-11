@@ -50,6 +50,8 @@ Install:
 import asyncio
 import json
 import logging
+import re
+import subprocess
 import threading
 import time
 from dataclasses import dataclass, field, asdict
@@ -554,6 +556,11 @@ class HVACState:
     steer_angle_deg: float = 0.0
     steer_torque: float = 0.0
     steer_status: int = 0
+
+    # ── CAN link health ──────────────────────────────────────────
+    # Per bus: controller state, error counters, and a plain-English
+    # diagnosis. "Silent" is not a diagnosis; which KIND of silent is.
+    can_health: list = field(default_factory=list)
 
     # ── Raw CAN view ─────────────────────────────────────────────
     # Per-ID snapshot for the dashboard's raw-frames table, rebuilt each
@@ -1477,6 +1484,31 @@ class HVACController:
             sorted(snap, key=lambda r: (r[0], r[1]))
         ]
 
+        # ── CAN link health ───────────────────────────────────
+        # Freshness lives here (from _last_rx), the controller facts come from
+        # the poller thread, and the diagnosis needs BOTH plus a view across
+        # every bus at once — one loose lead cannot silence two of them, so
+        # "all quiet" is a different fault from "this pair quiet".
+        with _can_health_lock:
+            facts = {k: dict(v) for k, v in _can_health.items()}
+        fresh = {"canveh": self.state.booster_veh_online,
+                 "canyaw": self.state.booster_yaw_online,
+                 "cansteer": 0 <= _age_of("cansteer", now) < STEER_STALE_S}
+        boost_links = ("canveh", "canyaw")
+        all_quiet = (all(not fresh[k] for k in boost_links)
+                     and any(facts.get(k, {}).get("exists") for k in boost_links))
+        self.state.can_health = []
+        for link in CAN_IFACES:
+            f = facts.get(link, {"exists": False, "iface": CAN_IFACES[link]})
+            lvl, txt = diagnose_can(link, f, fresh.get(link, False),
+                                    _last_rx.get(link, 0) > 0, all_quiet)
+            self.state.can_health.append({
+                "bus": link[3:], "label": CAN_LINK_LABEL.get(link, link),
+                "iface": f.get("iface", CAN_IFACES[link]),
+                "state": f.get("state", "?"), "errors": f.get("bus_errors", 0),
+                "level": lvl, "diag": txt,
+            })
+
         # ── Steering (Prius EPS) ──────────────────────────────
         # Liveness and an ID count only. steer_decoded stays False until a
         # signal on this column is actually confirmed — the screen must not
@@ -1709,6 +1741,112 @@ def can_reader_loop(link: str):
             except Exception:
                 pass
             time.sleep(3)
+
+
+# ── CAN link health ────────────────────────────────────────────
+# "The bus is silent" is not a diagnosis, and working out which kind of
+# silent it is has cost real bench time three times now — twice on a loose
+# lead that looked identical to a dead ECU. The controller already knows the
+# difference; it is in the error counters, which nothing was reading.
+#
+#   silent + error counters NOT moving  -> nothing is driving the pair at
+#       all. Wiring. A wrong bitrate or swapped polarity would be producing
+#       errors, not silence.
+#   error counters climbing             -> something IS driving it and we
+#       cannot decode it: bitrate, polarity, or termination.
+#   ERROR-PASSIVE / BUS-OFF             -> we transmitted and nobody ACKed,
+#       or the far end gave up. The 2-node ACK trap.
+#   ALL booster buses silent together   -> not per-pair wiring: power or
+#       ignition, since one loose lead cannot silence both.
+#
+# Polled in its own thread at CAN_HEALTH_S, never per tick: this shells out
+# to `ip`, and doing that 10x/second for three interfaces would be absurd.
+CAN_HEALTH_S = 3.0
+
+_can_health = {}                      # link -> raw facts from `ip`
+_can_health_lock = threading.Lock()
+
+_RE_STATE = re.compile(r"can state (\S+)")
+_RE_COUNTERS = re.compile(
+    r"re-started\s+bus-errors.*?\n\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)",
+    re.S)
+
+
+def _read_can_link(iface: str) -> dict:
+    """Facts about one CAN interface. Never raises — a missing interface is a
+    normal state here (can-steer has no adapter yet), not an error."""
+    out = {"exists": False, "up": False, "state": "?", "bus_errors": 0,
+           "restarts": 0}
+    try:
+        r = subprocess.run(["ip", "-details", "-statistics", "link", "show", iface],
+                           capture_output=True, text=True, timeout=4)
+    except Exception:
+        return out
+    if r.returncode != 0:
+        return out
+    txt = r.stdout
+    out["exists"] = True
+    out["up"] = ",UP," in txt.split("\n")[0] or "state UP" in txt.split("\n")[0]
+    m = _RE_STATE.search(txt)
+    if m:
+        out["state"] = m.group(1)
+    m = _RE_COUNTERS.search(txt)
+    if m:
+        out["restarts"] = int(m.group(1))
+        out["bus_errors"] = int(m.group(2))
+    return out
+
+
+def can_health_loop():
+    """Poll every CAN interface's controller state and error counters."""
+    prev_errors = {}
+    while True:
+        for link, iface in CAN_IFACES.items():
+            f = _read_can_link(iface)
+            # Rising is what matters, not the absolute count: a bus that
+            # errored an hour ago and is fine now must not read as faulty.
+            was = prev_errors.get(link)
+            f["errors_rising"] = was is not None and f["bus_errors"] > was
+            prev_errors[link] = f["bus_errors"]
+            f["iface"] = iface
+            with _can_health_lock:
+                _can_health[link] = f
+        time.sleep(CAN_HEALTH_S)
+
+
+# Human-readable label per link, for the dashboard.
+CAN_LINK_LABEL = {"canveh": "CAN-VEH", "canyaw": "CAN-YAW", "cansteer": "CAN-STEER"}
+
+
+def diagnose_can(link: str, facts: dict, flowing: bool, ever_seen: bool,
+                 all_booster_silent: bool) -> tuple:
+    """-> (level, text). Ordered most-specific first; the first match wins."""
+    if not facts.get("exists"):
+        if link == "cansteer":
+            return ("info", "adapter not fitted")
+        return ("fault", f"{facts.get('iface', link)} missing — adapter unplugged?")
+    if not facts.get("up"):
+        return ("fault", "interface down — sudo systemctl restart ibooster-can")
+
+    state = facts.get("state", "?")
+    if state == "BUS-OFF":
+        return ("fault", "BUS-OFF — nothing is ACKing this bus")
+    if state in ("ERROR-PASSIVE", "ERROR-WARNING"):
+        return ("fault", f"{state} — bitrate, polarity or termination")
+    if facts.get("errors_rising"):
+        return ("fault", "bus errors climbing — bitrate, polarity or termination")
+
+    if flowing:
+        return ("ok", "frames flowing")
+
+    if link == "cansteer":
+        return ("info", "fitted but silent — nothing decoded on this bus yet")
+    if all_booster_silent:
+        return ("warn", "both buses quiet — booster power or ignition, not wiring")
+    if not ever_seen:
+        return ("fault", "never seen — check wiring on this pair")
+    # The one that keeps happening.
+    return ("fault", "silent, no bus errors — wiring on this pair")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2070,6 +2208,8 @@ async def startup():
     for _link in CAN_IFACES:
         threading.Thread(target=can_reader_loop, args=(_link,), daemon=True,
                          name=f"can-{_link}-reader").start()
+    threading.Thread(target=can_health_loop, daemon=True,
+                     name="can-health").start()
     threading.Thread(target=lighting_reader_loop, daemon=True,
                      name="lighting-reader").start()
     threading.Thread(target=tsdash_reader_loop, daemon=True,
