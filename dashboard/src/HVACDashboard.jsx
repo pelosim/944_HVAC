@@ -433,10 +433,10 @@ function BusDot({ label, online, age, hz }) {
         background: online ? C.green : C.red,
         boxShadow: online ? `0 0 8px ${C.green}` : "none",
       }} />
-      <span style={{ fontFamily: "'Orbitron',monospace", fontSize: 16,
+      <span style={{ fontFamily: "'Orbitron',monospace", fontSize: 19,
         fontWeight: 700, color: online ? C.text : C.red, letterSpacing: 1 }}>
         {label}</span>
-      <span style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 16,
+      <span style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 19,
         color: C.mid }}>
         {online ? `${hz} Hz` : age < 0 ? "never seen" : `silent ${ageText(age)}`}
       </span>
@@ -451,7 +451,7 @@ function PressTile({ label, ok, psi }) {
       background: `linear-gradient(180deg, ${C.fasciaHi}, ${C.fascia})`,
       padding: "12px 16px", textAlign: "center",
     }}>
-      <div style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 17,
+      <div style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 19,
         fontWeight: 700, letterSpacing: 2, color: C.mid }}>{label}</div>
       {ok ? (
         <div style={{ fontFamily: "'Orbitron',monospace", fontSize: 44,
@@ -460,7 +460,7 @@ function PressTile({ label, ok, psi }) {
           {Math.round(psi)}<span style={{ fontSize: 18, color: C.mid }}> psi</span>
         </div>
       ) : (
-        <div style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 19,
+        <div style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 20,
           fontWeight: 600, color: C.dim, padding: "12px 0" }}>
           SENSOR NOT FITTED</div>
       )}
@@ -470,6 +470,63 @@ function PressTile({ label, ok, psi }) {
 
 const STROKE_FULL_MM = 45;       // bar span; end stop measured at 43.4
 const STROKE_ENDSTOP_MM = 43.4;
+
+// Shared raw-CAN table. Per-ID rather than a scrolling frame log on purpose:
+// the buses run ~186 fps and a scroll at 10 Hz would show a random sample,
+// while this shows everything that exists and lets the eye catch what moves.
+// The backend marks which byte indices changed since the last broadcast.
+function RawCanTable({ frames, busColors, empty }) {
+  const cols = "78px 70px 80px 48px 1fr";
+  return (
+    <>
+      <div style={{
+        display: "grid", gridTemplateColumns: cols, gap: "0 12px",
+        fontFamily: "'Rajdhani',sans-serif", fontSize: 18, fontWeight: 700,
+        letterSpacing: 1.5, color: C.dim, paddingBottom: 6,
+        borderBottom: `1px solid ${C.line}`,
+      }}>
+        <span>BUS</span><span>ID</span>
+        <span style={{ textAlign: "right" }}>Hz</span>
+        <span style={{ textAlign: "right" }}>DLC</span><span>DATA</span>
+      </div>
+      <div style={{ overflowY: "auto", flex: 1 }}>
+        {frames.map((f) => (
+          <div key={`${f.bus}${f.id}`} style={{
+            display: "grid", gridTemplateColumns: cols, gap: "0 12px",
+            alignItems: "baseline", padding: "5px 0",
+            borderBottom: `1px solid ${C.line}55`,
+            opacity: f.stale ? 0.35 : 1,
+          }}>
+            <span style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 19,
+              fontWeight: 700, letterSpacing: 1,
+              color: busColors[f.bus] || C.mid }}>{f.bus.toUpperCase()}</span>
+            <span style={{ fontFamily: "'Orbitron',monospace", fontSize: 19,
+              fontWeight: 700, color: C.text }}>{f.id}</span>
+            <span style={{ fontFamily: "'Orbitron',monospace", fontSize: 19,
+              color: C.mid, textAlign: "right",
+              fontVariantNumeric: "tabular-nums" }}>{f.hz}</span>
+            <span style={{ fontFamily: "'Orbitron',monospace", fontSize: 19,
+              color: C.dim, textAlign: "right" }}>{f.dlc}</span>
+            <span style={{ fontFamily: "'Orbitron',monospace", fontSize: 19,
+              letterSpacing: 1, whiteSpace: "nowrap", overflow: "hidden" }}>
+              {f.data.split(" ").map((b, i) => (
+                <span key={i} style={{
+                  color: (f.chg || []).includes(i) ? C.amber : C.mid,
+                  textShadow: (f.chg || []).includes(i) ? `0 0 8px ${C.amber}70` : "none",
+                  marginRight: 7,
+                }}>{b}</span>
+              ))}
+            </span>
+          </div>
+        ))}
+        {frames.length === 0 && (
+          <div style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 20,
+            color: C.dim, padding: "18px 0", lineHeight: 1.5 }}>{empty}</div>
+        )}
+      </div>
+    </>
+  );
+}
 
 function BrakeScreen({ st }) {
   // Status is meaningful only while the YAW bus has ever spoken; the
@@ -526,13 +583,13 @@ function BrakeScreen({ st }) {
             width: 2, background: C.amber }} />
         </div>
         <div style={{ display: "flex", justifyContent: "space-between",
-          fontFamily: "'Rajdhani',sans-serif", fontSize: 15, color: C.dim,
+          fontFamily: "'Rajdhani',sans-serif", fontSize: 19, color: C.dim,
           marginTop: 4 }}>
           <span>0</span><span style={{ color: C.amber }}>end stop 43.4</span>
         </div>
 
         <div style={{ marginTop: 14, fontFamily: "'Orbitron',monospace",
-          fontSize: 16, color: C.mid, fontVariantNumeric: "tabular-nums" }}>
+          fontSize: 19, color: C.mid, fontVariantNumeric: "tabular-nums" }}>
           raw {st.brakeStrokeRaw < 0 ? "----" : st.brakeStrokeRaw}
           <span style={{ color: C.dim }}>
             {"  ·  yaw x-check "}
@@ -582,52 +639,90 @@ function BrakeScreen({ st }) {
       {/* ── raw CAN ── */}
       <div style={{ ...panel, flex: 1, minWidth: 0 }}>
         {h("RAW CAN · PER-ID LIVE")}
+        <RawCanTable
+          frames={(st.canFrames || []).filter((f) => f.bus !== "steer")}
+          busColors={{ veh: C.ice, yaw: C.amber }}
+          empty="no frames — booster off, or CAN interfaces down" />
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════
+// STEERING SCREEN — 2004-2009 Prius (NHW20) EPS — FRAMEWORK ONLY
+// ════════════════════════════════════════════════════════════════
+// Deliberately shows NO decoded values. Nothing on this column has been
+// measured, and a screen that can draw a confident zero for a steering angle
+// is exactly the failure the project's VERIFY_FIRST discipline exists to
+// prevent. What it does give you is the discovery tool: the same live
+// per-ID raw view that made the iBooster decode tractable in one session.
+
+function SteerScreen({ st }) {
+  const frames = (st.canFrames || []).filter((f) => f.bus === "steer");
+  const panel = {
+    borderRadius: 10, border: `1.5px solid ${C.line}`,
+    background: `linear-gradient(180deg, ${C.fasciaHi}, ${C.fascia})`,
+    boxShadow: "0 2px 10px rgba(0,0,0,0.45)", padding: "18px 22px",
+    display: "flex", flexDirection: "column",
+  };
+  const h = (t) => (
+    <div style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 18,
+      fontWeight: 700, letterSpacing: 2.6, color: C.dim, marginBottom: 10 }}>{t}</div>
+  );
+  const Slot = ({ label }) => (
+    <div style={{ flex: 1, textAlign: "center", padding: "10px 0" }}>
+      <div style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 19,
+        fontWeight: 700, letterSpacing: 2, color: C.dim }}>{label}</div>
+      <div style={{ fontFamily: "'Orbitron',monospace", fontSize: 52,
+        fontWeight: 800, color: C.dim, lineHeight: 1.1 }}>--</div>
+    </div>
+  );
+
+  return (
+    <div style={{
+      position: "absolute", top: 70, left: 0, right: 0, bottom: 0,
+      zIndex: 10, background: C.bg, display: "flex", gap: 18,
+      padding: "20px 24px 22px",
+    }}>
+      <div style={{ ...panel, flex: "0 0 620px" }}>
+        {h("PRIUS EPS · NOT YET DECODED")}
+
         <div style={{
-          display: "grid", gridTemplateColumns: "70px 64px 74px 44px 1fr",
-          gap: "0 12px", fontFamily: "'Rajdhani',sans-serif", fontSize: 15,
-          fontWeight: 700, letterSpacing: 1.5, color: C.dim, paddingBottom: 6,
-          borderBottom: `1px solid ${C.line}` }}>
-          <span>BUS</span><span>ID</span>
-          <span style={{ textAlign: "right" }}>Hz</span>
-          <span style={{ textAlign: "right" }}>DLC</span><span>DATA</span>
+          border: `2px solid ${C.amber}`, borderRadius: 8, padding: "14px 18px",
+          background: "linear-gradient(180deg, #1b1408, #0a0e13)",
+        }}>
+          <div style={{ fontFamily: "'Orbitron',monospace", fontSize: 24,
+            fontWeight: 800, letterSpacing: 2, color: C.amber }}>
+            FRAMEWORK ONLY</div>
+          <div style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 20,
+            fontWeight: 600, color: C.text, marginTop: 8, lineHeight: 1.45 }}>
+            No CAN ID, bitrate, signal or scaling has been measured on this
+            column. Nothing is assumed from other Toyota units. Use the raw
+            view to find what moves when the wheel turns.</div>
         </div>
-        <div style={{ overflowY: "auto", flex: 1 }}>
-          {(st.canFrames || []).map((f) => (
-            <div key={`${f.bus}${f.id}`} style={{
-              display: "grid", gridTemplateColumns: "70px 64px 74px 44px 1fr",
-              gap: "0 12px", alignItems: "baseline", padding: "5px 0",
-              borderBottom: `1px solid ${C.line}55`,
-              opacity: f.stale ? 0.35 : 1 }}>
-              <span style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 15,
-                fontWeight: 700, letterSpacing: 1,
-                color: f.bus === "veh" ? C.ice : C.amber }}>
-                {f.bus.toUpperCase()}</span>
-              <span style={{ fontFamily: "'Orbitron',monospace", fontSize: 17,
-                fontWeight: 700, color: C.text }}>{f.id}</span>
-              <span style={{ fontFamily: "'Orbitron',monospace", fontSize: 15,
-                color: C.mid, textAlign: "right",
-                fontVariantNumeric: "tabular-nums" }}>{f.hz}</span>
-              <span style={{ fontFamily: "'Orbitron',monospace", fontSize: 15,
-                color: C.dim, textAlign: "right" }}>{f.dlc}</span>
-              <span style={{ fontFamily: "'Orbitron',monospace", fontSize: 16,
-                letterSpacing: 1, whiteSpace: "nowrap", overflow: "hidden" }}>
-                {f.data.split(" ").map((b, i) => (
-                  <span key={i} style={{
-                    color: (f.chg || []).includes(i) ? C.amber : C.mid,
-                    textShadow: (f.chg || []).includes(i)
-                      ? `0 0 8px ${C.amber}70` : "none",
-                    marginRight: 7 }}>{b}</span>
-                ))}
-              </span>
-            </div>
-          ))}
-          {(!st.canFrames || st.canFrames.length === 0) && (
-            <div style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 18,
-              color: C.dim, padding: "18px 0" }}>
-              no frames — booster off, or CAN interfaces down
-            </div>
-          )}
+
+        <div style={{ display: "flex", marginTop: 18 }}>
+          <Slot label="ANGLE" /><Slot label="TORQUE" /><Slot label="STATUS" />
         </div>
+
+        <div style={{ flex: 1 }} />
+
+        <div style={{ borderTop: `1px solid ${C.line}`, paddingTop: 14 }}>
+          <BusDot label="CAN-STEER" online={st.steerOnline}
+            age={st.steerAge} hz="live" />
+          <div style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 19,
+            color: C.mid, marginTop: 10, lineHeight: 1.45 }}>
+            {st.steerAge < 0
+              ? "Interface can-steer not present — a third CANable adapter is needed. It is pinned by USB serial the same way can-veh and can-yaw are."
+              : `${st.steerIdsSeen} ID${st.steerIdsSeen === 1 ? "" : "s"} seen. Bitrate is assumed 500 kbps and unverified — treat a silent bus as the wrong rate before a dead unit.`}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ ...panel, flex: 1, minWidth: 0 }}>
+        {h("RAW CAN · PER-ID LIVE")}
+        <RawCanTable frames={frames} busColors={{ steer: C.vfd }}
+          empty={"nothing on can-steer.\n\nFit the third adapter, bring the interface up, then turn the wheel and watch which bytes move."} />
       </div>
     </div>
   );
@@ -664,6 +759,12 @@ function SystemStatus({ st, onClose }) {
     boost:  st.brakeStatus === 2 ? S_BAD
             : st.boosterVehOnline && st.boosterYawOnline ? S_OK
             : (st.boosterVehAge < 0 && st.boosterYawAge < 0) ? S_UNK : S_BAD,
+    // Per-bus, so a single dead lead names itself instead of greying the
+    // whole booster out.
+    bveh:   st.boosterVehOnline ? S_OK : st.boosterVehAge < 0 ? S_UNK : S_BAD,
+    byaw:   st.boosterYawOnline ? S_OK : st.boosterYawAge < 0 ? S_UNK : S_BAD,
+    // Not fitted yet, and "not fitted" is not a fault.
+    steer:  st.steerOnline ? S_OK : S_UNK,
   };
   const vals = Object.values(L);
   const nBad = vals.filter((v) => v === S_BAD).length;
@@ -692,12 +793,19 @@ function SystemStatus({ st, onClose }) {
       : `can-${st.boosterVehOnline ? "yaw" : "veh"} silent`]);
   if (st.flapsHeld) attention.push([C.dim, "FLAP HELD",
     `${st.flapsHeld.toUpperCase()} not driven — awaiting recalibration`]);
+  if (!st.steerOnline) attention.push([C.dim, "PRIUS EPS",
+    "can-steer not fitted - framework only, nothing decoded"]);
   attention.push([C.dim, "HEAD UNIT - IR", "write-only, no feedback path"]);
   attention.push([C.dim, "MS3 -> TSDASH", "not visible from this Pi"]);
 
   return (
+    // Starts below the header rail rather than covering it: with four
+    // screens the VIEW selector has to stay reachable from here too. The
+    // 1920x720 viewBox letterboxes very slightly into the 650px that leaves,
+    // which is cheaper than re-laying-out every node coordinate.
     <div onClick={onClose} style={{
-      position: "absolute", inset: 0, zIndex: 30, background: C.bg, cursor: "pointer",
+      position: "absolute", top: 70, left: 0, right: 0, bottom: 0,
+      zIndex: 30, background: C.bg, cursor: "pointer",
     }}>
       <svg viewBox="0 0 1920 720" width="100%" height="100%"
         role="img" aria-label="System status: link topology">
@@ -738,7 +846,9 @@ function SystemStatus({ st, onClose }) {
         <SysLink d="M1456,522 L1196,522" st={L.ms3}    label="FTDI" lx={1326} ly={506} />
         <SysLink d="M296,588 L336,588"   st={L.espnow} label="NOW"  lx={316} ly={578} />
         <SysLink d="M596,588 L636,588"   st={L.light} />
-        <SysLink d="M296,298 L336,298"   st={L.boost}  label="CAN×2" lx={316} ly={288} />
+        <SysLink d="M286,272 L336,268"   st={L.bveh}   label="VEH" lx={311} ly={258} />
+        <SysLink d="M286,306 L336,330"   st={L.byaw}   label="YAW" lx={311} ly={324} />
+        <SysLink d="M286,428 L336,348"   st={L.steer}  label="CAN" lx={300} ly={412} />
 
         {/* nodes */}
         <SysNode x={46}   y={114} title="iDRIVE KNOB"   st={L.can} />
@@ -746,11 +856,20 @@ function SystemStatus({ st, onClose }) {
           sub={st.idriveOnline ? ageText(st.idriveAge)
                : st.idriveAge < 0 ? "no heartbeat" : "silent"} st={L.uart} />
         <SysNode x={636}  y={114} title="HEAD UNIT"     st={L.ir} />
-        <SysNode x={46}   y={266} title="iBOOSTER"
-          sub={st.brakeStatus === 2 ? "FAULT latched"
-               : L.boost === S_OK ? `${st.brakeStrokeMm.toFixed(1)} mm`
-               : L.boost === S_UNK ? "not connected" : "bus silent"}
+        {/* Brake comms: two buses drawn separately, because they fail
+            separately and behave differently in a latched fault — 0x38E keeps
+            reporting position while 0x39D stays pinned at its sentinel. A
+            single lumped link would hide exactly the case worth seeing. */}
+        <SysNode x={46}   y={254} w={240} title="iBOOSTER"
+          sub={st.brakeStatus === 2 ? "FAULT latched - assist off"
+               : L.boost === S_OK ? `${st.brakeStrokeMm.toFixed(1)} mm - assisting`
+               : (st.boosterVehAge < 0 && st.boosterYawAge < 0) ? "not connected"
+               : !st.boosterVehOnline && !st.boosterYawOnline ? "both buses silent"
+               : `can-${st.boosterVehOnline ? "yaw" : "veh"} silent`}
           st={L.boost} />
+        <SysNode x={46}   y={396} w={240} title="PRIUS EPS"
+          sub={st.steerOnline ? `${st.steerIdsSeen} ids - undecoded` : "not fitted"}
+          st={L.steer} />
         <SysNode x={336}  y={246} w={260} h={104} title="HVAC Pi"
           sub={`up ${Math.floor(st.uptime / 3600)}h ${Math.floor((st.uptime % 3600) / 60)}m`}
           st={S_OK} />
@@ -798,7 +917,7 @@ function SystemStatus({ st, onClose }) {
           <rect x="392" y="681" width="26" height="6" fill={C.dim} />
           <text x="430" y="694">NO FEEDBACK PATH</text>
           <text x="1876" y="694" textAnchor="end" fill={C.dim}>
-            BACK BUTTON OR TAP TO EXIT
+            TAP TO EXIT - OR PICK A SCREEN ABOVE
           </text>
         </g>
       </svg>
@@ -884,6 +1003,9 @@ export default function HVACDashboard() {
   const [brakePressFront, setBrakePressFront] = useState(0);
   const [brakePressRear, setBrakePressRear] = useState(0);
   const [canFrames, setCanFrames] = useState([]);
+  const [steerOnline, setSteerOnline] = useState(false);
+  const [steerAge, setSteerAge] = useState(-1);
+  const [steerIdsSeen, setSteerIdsSeen] = useState(0);
 
   const sendCmd = useCallback((cmd) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -982,6 +1104,9 @@ export default function HVACDashboard() {
           apply("brake_press_front_psi", setBrakePressFront);
           apply("brake_press_rear_psi", setBrakePressRear);
           apply("can_frames", setCanFrames);
+          apply("steer_online", setSteerOnline);
+          apply("steer_age_s", setSteerAge);
+          apply("steer_ids_seen", setSteerIdsSeen);
         } catch (e) { /* ignore */ }
       };
       ws.onclose = () => {
@@ -1022,7 +1147,14 @@ export default function HVACDashboard() {
   // Tap-to-dismiss mirrors the BACK button. Sent as an explicit false rather
   // than "toggle" so a tap can never race the knob into re-opening the page.
   const cmdCloseSystem = () => { setSystemView(false); sendCmd({ system_view: false }); };
-  const cmdMainScreen = (v) => { setMainScreen(v); sendCmd({ main_screen: v }); };
+  // SYSTEM is still a separate boolean in state, because the iDrive knob
+  // toggles it by name. The selector hides that: picking any other screen
+  // also clears it, in one message so the two can never disagree.
+  const cmdMainScreen = (v) => {
+    if (v === "system") { setSystemView(true); sendCmd({ system_view: true }); return; }
+    setMainScreen(v); setSystemView(false);
+    sendCmd({ main_screen: v, system_view: false });
+  };
   const cmdAcOn = (v) => { setAcOn(v); sendCmd({ ac_on: v }); };
   const cmdHeatValve = (v) => { setHeatValve(v); sendCmd({ heat_valve: v }); };
   const cmdOutsideAir = (v) => { setOutsideAir(v); sendCmd({ outside_air: v }); };
@@ -1165,7 +1297,7 @@ export default function HVACDashboard() {
               accelOk, accelBad, gLat, gLon,
               mixFault: mixFlapFault, defFault: defrostFlapFault, footFault: footFlapFault,
               boosterVehOnline, boosterYawOnline, boosterVehAge, boosterYawAge,
-              brakeStatus, brakeStrokeMm,
+              brakeStatus, brakeStrokeMm, steerOnline, steerIdsSeen,
             }}
           />
         )}
@@ -1175,7 +1307,13 @@ export default function HVACDashboard() {
             below SystemStatus itself so BACK still reveals whichever main
             screen was selected. Starts at y=70 so the header rail — and the
             VIEW switch that got you here — never leaves the screen. */}
-        {mainScreen === "brake" && (
+        {!systemView && mainScreen === "steer" && (
+          <SteerScreen st={{
+            steerOnline, steerAge, steerIdsSeen, canFrames,
+          }} />
+        )}
+
+        {!systemView && mainScreen === "brake" && (
           <BrakeScreen st={{
             boosterVehOnline, boosterYawOnline, boosterVehAge, boosterYawAge,
             brakeStrokeMm, brakeStrokeRaw, brakePosYaw, brakeStatus,
@@ -1236,10 +1374,46 @@ export default function HVACDashboard() {
           borderBottom: `1px solid ${C.lineHi}`,
           boxShadow: "0 3px 12px rgba(0,0,0,0.5)",
         }}>
+          {/* The "Electronic Climate Control" subtitle used to sit here. It
+              went to make room for the VIEW selector, and the selector does
+              its job better: with four screens, a decorative subtitle that
+              says "climate control" while you are on the brake page is worse
+              than nothing. */}
           <div style={{ display: "flex", alignItems: "baseline", gap: 14 }}>
             <span style={{ fontFamily: "'Orbitron',monospace", fontSize: 23, fontWeight: 800,
               letterSpacing: 6, color: C.text }}>PORSCHE 944S</span>
-            <span style={{ ...labelStyle, fontSize: 18, color: C.dim }}>Electronic Climate Control</span>
+          </div>
+
+          {/* ── VIEW: the only way between the four screens, so it lives in
+              the header rail, which every screen leaves visible. Four
+              labelled buttons rather than a cycling toggle — with four
+              destinations a toggle cannot show where you are and where you
+              are going at the same time. */}
+          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+            <span style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 19, fontWeight: 700,
+              letterSpacing: 2, color: C.dim, whiteSpace: "nowrap" }}>VIEW</span>
+            <div style={{ display: "flex", border: `1.5px solid ${C.line}`,
+              borderRadius: 7, overflow: "hidden" }}>
+              {[{ k: "hvac", l: "HVAC" }, { k: "brake", l: "BRAKE" },
+                { k: "steer", l: "STEER" }, { k: "system", l: "SYSTEM" }].map((o) => {
+                const on = o.k === "system" ? systemView : (!systemView && mainScreen === o.k);
+                // Only BRAKE carries an alert tint: it is the one screen with a
+                // fault that outlives the page you are looking at.
+                const alert = o.k === "brake" && brakeStatus === 2;
+                const tint = alert ? C.red : C.vfd;
+                return (
+                  <button key={o.k} onClick={() => cmdMainScreen(o.k)} style={{
+                    padding: "9px 13px", border: "none",
+                    background: on ? (alert ? "rgba(255,59,48,0.18)" : C.vfdDim) : "transparent",
+                    color: alert ? C.red : on ? C.vfd : C.mid,
+                    fontFamily: "'Rajdhani',sans-serif", fontSize: 20, fontWeight: 700,
+                    letterSpacing: 1.4, whiteSpace: "nowrap",
+                    textShadow: on ? `0 0 9px ${tint}70` : "none",
+                    transition: "all 0.15s",
+                  }}>{o.l}</button>
+                );
+              })}
+            </div>
           </div>
 
           <div style={{ flex: 1 }} />
@@ -1256,32 +1430,6 @@ export default function HVACDashboard() {
             {/* Lights ONLY on a latched booster fault — visible from either
                 screen, because the fault outlives whatever page is showing. */}
             <Lamp label="BRAKE" on={brakeStatus === 2} color={C.red} blink />
-          </div>
-
-          {/* Main screen selector — same idiom as AUX so it reads as one
-              family of controls. Two labelled buttons rather than a toggle:
-              a toggle showing either current or target is ambiguous both ways. */}
-          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-            <span style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 16, fontWeight: 700,
-              letterSpacing: 2, color: C.dim, whiteSpace: "nowrap" }}>VIEW</span>
-            <div style={{ display: "flex", border: `1.5px solid ${C.line}`,
-              borderRadius: 7, overflow: "hidden" }}>
-              {[{ k: "hvac", l: "HVAC" }, { k: "brake", l: "BRAKE" }].map((o) => {
-                const on = mainScreen === o.k;
-                const alert = o.k === "brake" && brakeStatus === 2;
-                return (
-                  <button key={o.k} onClick={() => cmdMainScreen(o.k)} style={{
-                    padding: "9px 15px", border: "none",
-                    background: on ? (alert ? "rgba(255,59,48,0.18)" : C.vfdDim) : "transparent",
-                    color: alert ? C.red : on ? C.vfd : C.mid,
-                    fontFamily: "'Rajdhani',sans-serif", fontSize: 19, fontWeight: 700,
-                    letterSpacing: 1.6, whiteSpace: "nowrap",
-                    textShadow: on ? `0 0 9px ${(alert ? C.red : C.vfd)}70` : "none",
-                    transition: "all 0.15s",
-                  }}>{o.l}</button>
-                );
-              })}
-            </div>
           </div>
 
           {/* Round auxiliary screen selector */}

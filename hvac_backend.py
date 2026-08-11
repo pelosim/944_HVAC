@@ -223,6 +223,33 @@ ACCEL_INVERT_Y = False
 BOOSTER_IFACES = {"canveh": "can-veh", "canyaw": "can-yaw"}
 BOOSTER_STALE_S = 2.0      # 0x39D arrives at 25 Hz — 2 s is 50 missed frames
 
+# --- Steering CAN: 2004-2009 Prius (NHW20) EPS — FRAMEWORK ONLY ----
+# NOTHING HERE IS DECODED. No CAN ID, bitrate, signal or scaling for this
+# column has been measured, and none is asserted below. The screen exists so
+# the raw bus can be explored the same way the iBooster's was — capture,
+# rank fields by smoothness, hold known positions — not because anything is
+# known yet. Community figures for other Toyota EPS units are NOT carried
+# over; that mistake would have put a wrong 0x38E full-scale into the brake
+# decode had it not been checked against this unit.
+#
+# Bitrate is a guess until measured. 500 kbps is the usual Toyota chassis
+# rate, so the interface is brought up there, but treat a silent bus as
+# "wrong rate" before "dead unit" — see the iBooster bench log.
+#
+# ⚠️ ARCHITECTURAL UNKNOWN, and it is the important one. The iBooster
+# assists standalone, which is what made a passive monitor sufficient. EPS
+# columns are widely reported to require CAN traffic before they will
+# assist at all. If that holds here, read-only monitoring cannot be the end
+# state for steering, and commanding a steering actuator is a different
+# safety conversation than anything in this project so far. Answer that
+# BEFORE building anything past this framework. This file has no send path.
+STEER_IFACE = "can-steer"          # third adapter — NOT PRESENT YET
+STEER_STALE_S = 2.0
+
+# Every CAN link this process reads. Reader threads are identical; only the
+# per-ID decode below differs, and only for the two booster buses.
+CAN_IFACES = {"canveh": "can-veh", "canyaw": "can-yaw", "cansteer": STEER_IFACE}
+
 # 0x39D (vehicle bus): b2:b3 = stroke, uint16 LE. Combined 5-point fit.
 BRAKE_STROKE_SCALE  = 320.68     # counts per mm
 BRAKE_STROKE_OFFSET = 3.3
@@ -468,8 +495,11 @@ class HVACState:
     system_view: bool = False         # touchscreen shows the link topology page
 
     # ── Main-screen selector ──────────────────────────────────────
-    # "hvac" or "brake". Deliberately NOT persisted: a car should always
-    # wake up showing climate control, not whatever was up at shutdown.
+    # "hvac", "brake" or "steer". Deliberately NOT persisted: a car should
+    # always wake up showing climate control, not whatever was up at
+    # shutdown. system_view stays a separate boolean rather than a fourth
+    # value here because the iDrive knob toggles it by name — folding it in
+    # would break the knob for no gain.
     main_screen: str = "hvac"
 
     # ── iBooster (read-only CAN) ──────────────────────────────────
@@ -490,6 +520,19 @@ class HVACState:
     brake_press_ok: bool = False
     brake_press_front_psi: float = 0.0
     brake_press_rear_psi: float = 0.0
+
+    # ── Steering (Prius EPS) — FRAMEWORK, NOTHING DECODED ────────
+    # steer_decoded stays False until a signal is actually confirmed on this
+    # column. The screen reads it and refuses to draw numbers rather than
+    # showing a confident zero, which is the failure mode the whole
+    # VERIFY_FIRST discipline exists to prevent.
+    steer_online: bool = False
+    steer_age_s: float = -1.0
+    steer_ids_seen: int = 0
+    steer_decoded: bool = False
+    steer_angle_deg: float = 0.0
+    steer_torque: float = 0.0
+    steer_status: int = 0
 
     # ── Raw CAN view ─────────────────────────────────────────────
     # Per-ID snapshot for the dashboard's raw-frames table, rebuilt each
@@ -1367,6 +1410,15 @@ class HVACController:
             sorted(snap, key=lambda r: (r[0], r[1]))
         ]
 
+        # ── Steering (Prius EPS) ──────────────────────────────
+        # Liveness and an ID count only. steer_decoded stays False until a
+        # signal on this column is actually confirmed — the screen must not
+        # be able to show a confident number that nothing measured.
+        self.state.steer_age_s = _age_of("cansteer", now)
+        self.state.steer_online = 0 <= self.state.steer_age_s < STEER_STALE_S
+        self.state.steer_ids_seen = sum(
+            1 for f in self.state.can_frames if f["bus"] == "steer")
+
         # ── Bench-test override ───────────────────────────────
         # Force a fake cabin temp so heating can be exercised indoors.
         # Not persisted; a reboot always returns to the real sensor.
@@ -1520,11 +1572,21 @@ _CAN_EFF_MASK = 0x1FFFFFFF
 _CAN_ERR_FLAG = 0x20000000
 
 
-def booster_reader_loop(link: str):
-    """Read one iBooster bus forever. link is 'canveh' or 'canyaw'."""
+def can_reader_loop(link: str):
+    """Read one CAN bus forever. link is a key of CAN_IFACES.
+
+    Identical for every bus: collect per-ID stats for the raw view, and for
+    the two booster buses additionally decode the signals in DECODE.md. The
+    steering bus has no decode because nothing on it is known — it collects
+    raw stats only, which is exactly what a discovery screen needs.
+
+    A missing interface is normal, not an error: can-steer does not exist
+    until a third adapter is fitted. Log once, retry forever, never let it
+    take the process down.
+    """
     import socket as sk
     import struct as st
-    iface = BOOSTER_IFACES[link]
+    iface = CAN_IFACES[link]
     complained = False
     while True:
         try:
@@ -1532,7 +1594,7 @@ def booster_reader_loop(link: str):
             s.bind((iface,))
             s.settimeout(1.0)
             complained = False
-            log.info("iBooster: %s up on %s", link, iface)
+            log.info("CAN: %s up on %s", link, iface)
             while True:
                 try:
                     frame = s.recv(16)
@@ -1573,8 +1635,7 @@ def booster_reader_loop(link: str):
                         _brake["pos_yaw"] = data[3] | ((data[4] & 0x0F) << 8)
         except OSError as e:
             if not complained:
-                log.warning("iBooster: %s (%s) unavailable: %s — retrying",
-                            link, iface, e)
+                log.info("CAN: %s (%s) unavailable: %s — retrying", link, iface, e)
                 complained = True
             try:
                 s.close()
@@ -1623,7 +1684,7 @@ LINK_STALE_S = 10.0
 # reader threads, read by tick(). Plain floats: assignment is atomic under the
 # GIL and a torn read here would only ever be one tick stale.
 _last_rx = {"idrive": 0.0, "illum": 0.0, "tsdash": 0.0,
-            "canveh": 0.0, "canyaw": 0.0}
+            "canveh": 0.0, "canyaw": 0.0, "cansteer": 0.0}
 
 # Whether the reader thread currently holds the port open. Separate from
 # freshness on purpose: an open port that has gone quiet is a different fault
@@ -1939,10 +2000,9 @@ async def startup():
     asyncio.create_task(control_loop())
     threading.Thread(target=idrive_reader_loop, daemon=True,
                      name="idrive-reader").start()
-    threading.Thread(target=booster_reader_loop, args=("canveh",), daemon=True,
-                     name="booster-veh-reader").start()
-    threading.Thread(target=booster_reader_loop, args=("canyaw",), daemon=True,
-                     name="booster-yaw-reader").start()
+    for _link in CAN_IFACES:
+        threading.Thread(target=can_reader_loop, args=(_link,), daemon=True,
+                         name=f"can-{_link}-reader").start()
     threading.Thread(target=lighting_reader_loop, daemon=True,
                      name="lighting-reader").start()
     threading.Thread(target=tsdash_reader_loop, daemon=True,
