@@ -511,6 +511,197 @@ function RawCanTable({ frames, busColors, empty }) {
   );
 }
 
+// ════════════════════════════════════════════════════════════════
+// BRAKE TREND — stroke and both circuits on one time base
+// ════════════════════════════════════════════════════════════════
+// The backend sends a MIN/MAX ENVELOPE per bin, not point samples, and the
+// drawing here has to respect that or the point is lost: each bin is ~83 ms
+// of 50 Hz sampling, and the tall thin part of the band is a real pressure
+// excursion the eye should catch, not a rendering artifact to smooth away.
+// So every channel draws twice — a translucent band between lo and hi, and
+// a solid line down the middle of it. Flat cruising looks like a line;
+// anything fast looks like a stripe, which is exactly the distinction you
+// want at a glance.
+//
+// Gaps are drawn as gaps. A null bin means no reading arrived — booster
+// silent, or the sensor supply gone — and joining across it would invent
+// a pedal input that never happened.
+const TREND_W = 1828;      // panel inner width on the 1920 stage
+const TREND_H = 150;
+const TREND_L = 54, TREND_R = 66, TREND_T = 8, TREND_B = 20;
+const TREND_PLOT_W = TREND_W - TREND_L - TREND_R;
+const TREND_PLOT_H = TREND_H - TREND_T - TREND_B;
+const TREND_WINDOWS = [10, 30];   // seconds; both served from one 30 s ring
+
+// Build [band, midline] path data for one channel over its lo/hi arrays.
+// Runs of consecutive non-null bins become separate subpaths.
+function trendPaths(lo, hi, x, y) {
+  const band = [], mid = [];
+  let run = [];
+  const flush = () => {
+    if (!run.length) return;
+    const up = run.map((i) => `${x(i)},${y(hi[i])}`);
+    const dn = run.slice().reverse().map((i) => `${x(i)},${y(lo[i])}`);
+    band.push(`M${up.join("L")}L${dn.join("L")}Z`);
+    mid.push(`M${run.map((i) => `${x(i)},${y((lo[i] + hi[i]) / 2)}`).join("L")}`);
+    run = [];
+  };
+  for (let i = 0; i < lo.length; i++) {
+    if (lo[i] === null || lo[i] === undefined) flush();
+    else run.push(i);
+  }
+  flush();
+  return [band.join(" "), mid.join(" ")];
+}
+
+function BrakeTrend({ trend, pressOk, live, win, setWin }) {
+  const bins = trend.bins || 0;
+  const winS = trend.win_s || 30;
+  const pressFull = trend.press_full || 1600;  // backend owns it; this
+                                               // only shows pre-first-frame
+
+  // The 10 s view is a slice of the same 30 s payload — no round trip to
+  // the backend, so the toggle is instant and switching never costs you
+  // history you already had.
+  const shown = Math.max(2, Math.round(bins * (Math.min(win, winS) / winS)));
+  const cut = (a) => (a || []).slice(Math.max(0, bins - shown));
+
+  const mmLo = cut(trend.mm_lo), mmHi = cut(trend.mm_hi);
+  const pfLo = cut(trend.pf_lo), pfHi = cut(trend.pf_hi);
+  const prLo = cut(trend.pr_lo), prHi = cut(trend.pr_hi);
+
+  const x = (i) => TREND_L + (i / (shown - 1)) * TREND_PLOT_W;
+  const yOf = (v, full) => TREND_T + TREND_PLOT_H
+    - (Math.max(0, Math.min(full, v)) / full) * TREND_PLOT_H;
+  const yMm = (v) => yOf(v, STROKE_FULL_MM);
+  const yPsi = (v) => yOf(v, pressFull);
+
+  const [mmBand, mmMid] = trendPaths(mmLo, mmHi, x, yMm);
+  const [pfBand, pfMid] = trendPaths(pfLo, pfHi, x, yPsi);
+  const [prBand, prMid] = trendPaths(prLo, prHi, x, yPsi);
+
+  const tStep = win <= 10 ? 2 : 5;
+  const ticks = [];
+  for (let t = 0; t <= win; t += tStep) ticks.push(t);
+
+  const Trace = ({ band, mid, col }) => (
+    <>
+      <path d={band} fill={col} fillOpacity={0.28} stroke="none" />
+      <path d={mid} fill="none" stroke={col} strokeWidth={2}
+        strokeLinejoin="round" strokeLinecap="round" />
+    </>
+  );
+
+  const Key = ({ col, label, val, unit, on }) => (
+    <span style={{ display: "inline-flex", alignItems: "baseline", gap: 7 }}>
+      <span style={{ width: 16, height: 3, borderRadius: 2,
+        background: on ? col : C.dim, alignSelf: "center" }} />
+      <span style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 18,
+        fontWeight: 700, letterSpacing: 1.6, color: on ? C.mid : C.dim }}>
+        {label}</span>
+      <span style={{ fontFamily: "'Orbitron',monospace", fontSize: 19,
+        fontWeight: 700, color: on ? col : C.dim,
+        fontVariantNumeric: "tabular-nums" }}>
+        {on ? val : "--"}</span>
+      <span style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 16,
+        color: C.dim }}>{unit}</span>
+    </span>
+  );
+
+  return (
+    <>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 26,
+        marginBottom: 4 }}>
+        <div style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 18,
+          fontWeight: 700, letterSpacing: 2.6, color: C.dim }}>
+          TREND · {win}s</div>
+        <Key col={C.vfd} label="STROKE" unit="mm" on={live.mm !== null}
+          val={live.mm === null ? "--" : live.mm.toFixed(1)} />
+        <Key col={C.amber} label="FRONT" unit="psi" on={pressOk}
+          val={Math.round(live.front)} />
+        <Key col={C.green} label="REAR" unit="psi" on={pressOk}
+          val={Math.round(live.rear)} />
+        {!pressOk && (
+          <span style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 18,
+            fontWeight: 600, color: C.dim, letterSpacing: 1 }}>
+            pressure sensors not fitted — stroke only</span>
+        )}
+
+        <div style={{ flex: 1 }} />
+        <div style={{ display: "flex", gap: 8 }}>
+          {TREND_WINDOWS.map((w) => (
+            <div key={w} onClick={() => setWin(w)} style={{
+              fontFamily: "'Orbitron',monospace", fontSize: 17, fontWeight: 700,
+              padding: "4px 14px", borderRadius: 6, cursor: "pointer",
+              letterSpacing: 1,
+              color: win === w ? C.bg : C.mid,
+              background: win === w ? C.vfd : "transparent",
+              border: `1.5px solid ${win === w ? C.vfd : C.line}`,
+            }}>{w}s</div>
+          ))}
+        </div>
+      </div>
+
+      <svg width="100%" height={TREND_H} viewBox={`0 0 ${TREND_W} ${TREND_H}`}
+        preserveAspectRatio="none" style={{ display: "block" }}>
+        {/* time grid — now is at the RIGHT edge, history scrolls left */}
+        {ticks.map((t) => {
+          const px = TREND_L + TREND_PLOT_W * (1 - t / win);
+          return (
+            <g key={t}>
+              <line x1={px} x2={px} y1={TREND_T} y2={TREND_T + TREND_PLOT_H}
+                stroke={C.line} strokeWidth={1} />
+              <text x={px} y={TREND_H - 5} fill={C.dim} fontSize={15}
+                fontFamily="'Rajdhani',sans-serif" textAnchor="middle">
+                {t === 0 ? "now" : `-${t}`}</text>
+            </g>
+          );
+        })}
+        {[0, 0.5, 1].map((f) => (
+          <line key={f} x1={TREND_L} x2={TREND_L + TREND_PLOT_W}
+            y1={TREND_T + TREND_PLOT_H * f} y2={TREND_T + TREND_PLOT_H * f}
+            stroke={C.line} strokeWidth={1} />
+        ))}
+
+        {/* left axis: stroke, right axis: pressure. Two units share the
+            plot, so each keeps its own labelled edge in its own colour —
+            an unlabelled shared axis is how you end up reading psi off a
+            millimetre scale. */}
+        {[0, 0.5, 1].map((f) => (
+          <text key={`l${f}`} x={TREND_L - 8} y={TREND_T + TREND_PLOT_H * (1 - f) + 5}
+            fill={C.vfd} fontSize={15} fontFamily="'Rajdhani',sans-serif"
+            textAnchor="end" opacity={0.75}>
+            {Math.round(STROKE_FULL_MM * f)}</text>
+        ))}
+        {[0, 0.5, 1].map((f) => (
+          <text key={`r${f}`} x={TREND_L + TREND_PLOT_W + 8}
+            y={TREND_T + TREND_PLOT_H * (1 - f) + 5}
+            fill={pressOk ? C.amber : C.dim} fontSize={15}
+            fontFamily="'Rajdhani',sans-serif" opacity={0.75}>
+            {Math.round(pressFull * f)}</text>
+        ))}
+        <text x={TREND_L - 8} y={TREND_T - 1} fill={C.vfd} fontSize={14}
+          fontFamily="'Rajdhani',sans-serif" textAnchor="end" opacity={0.6}>mm</text>
+        <text x={TREND_L + TREND_PLOT_W + 8} y={TREND_T - 1}
+          fill={pressOk ? C.amber : C.dim} fontSize={14}
+          fontFamily="'Rajdhani',sans-serif" opacity={0.6}>psi</text>
+
+        {/* Pressure first so stroke draws on top: stroke is the channel
+            that is always present, and it is the one you look for. */}
+        {pressOk && <Trace band={pfBand} mid={pfMid} col={C.amber} />}
+        {pressOk && <Trace band={prBand} mid={prMid} col={C.green} />}
+        <Trace band={mmBand} mid={mmMid} col={C.vfd} />
+
+        {bins === 0 && (
+          <text x={TREND_W / 2} y={TREND_H / 2} fill={C.dim} fontSize={20}
+            fontFamily="'Rajdhani',sans-serif" textAnchor="middle">
+            waiting for the first samples</text>
+        )}
+      </svg>
+    </>
+  );
+}
+
 function BrakeScreen({ st }) {
   // Status is meaningful only while the YAW bus has ever spoken; the
   // backend holds the last value through dropouts because the fault
@@ -534,6 +725,8 @@ function BrakeScreen({ st }) {
   const noStroke = vehDead && !usingYaw;
 
   const statusColor = noData ? C.dim : fault ? C.red : C.green;
+  // Window is purely local — the backend always ships the full 30 s ring.
+  const [trendWin, setTrendWin] = useState(30);
   const panel = {
     borderRadius: 10, border: `1.5px solid ${C.line}`,
     background: `linear-gradient(180deg, ${C.fasciaHi}, ${C.fascia})`,
@@ -548,9 +741,10 @@ function BrakeScreen({ st }) {
   return (
     <div style={{
       position: "absolute", top: 70, left: 0, right: 0, bottom: 0,
-      zIndex: 10, background: C.bg, display: "flex", gap: 18,
-      padding: "20px 24px 22px",
+      zIndex: 10, background: C.bg, display: "flex", flexDirection: "column",
+      gap: 16, padding: "20px 24px 22px",
     }}>
+      <div style={{ display: "flex", gap: 18, flex: 1, minHeight: 0 }}>
       {/* ── stroke ── */}
       <div style={{ ...panel, flex: "0 0 560px" }}>
         {h(usingYaw ? "PEDAL STROKE · 0x38E FALLBACK" : "PEDAL STROKE · 0x39D")}
@@ -662,6 +856,20 @@ function BrakeScreen({ st }) {
           frames={(st.canFrames || []).filter((f) => f.bus !== "steer")}
           busColors={{ veh: C.ice, yaw: C.amber }}
           empty="no frames — booster off, or CAN interfaces down" />
+      </div>
+      </div>
+
+      {/* ── trend ── */}
+      <div style={{ ...panel, flex: "0 0 210px", padding: "12px 22px 8px" }}>
+        <BrakeTrend
+          trend={st.brakeTrend || {}}
+          pressOk={st.brakePressOk}
+          win={trendWin}
+          setWin={setTrendWin}
+          /* Same fallback the big readout uses, so the legend and the
+             number above it can never tell different stories. */
+          live={{ mm: noStroke ? null : shownMm,
+                  front: st.brakePressFront, rear: st.brakePressRear }} />
       </div>
     </div>
   );
@@ -1069,6 +1277,7 @@ export default function HVACDashboard() {
   const [brakePressOk, setBrakePressOk] = useState(false);
   const [brakePressFront, setBrakePressFront] = useState(0);
   const [brakePressRear, setBrakePressRear] = useState(0);
+  const [brakeTrend, setBrakeTrend] = useState({});
   const [canFrames, setCanFrames] = useState([]);
   const [canHealth, setCanHealth] = useState([]);
   const [steerOnline, setSteerOnline] = useState(false);
@@ -1172,6 +1381,7 @@ export default function HVACDashboard() {
           apply("brake_press_ok", setBrakePressOk);
           apply("brake_press_front_psi", setBrakePressFront);
           apply("brake_press_rear_psi", setBrakePressRear);
+          apply("brake_trend", setBrakeTrend);
           apply("can_frames", setCanFrames);
           apply("can_health", setCanHealth);
           apply("steer_online", setSteerOnline);
@@ -1388,6 +1598,7 @@ export default function HVACDashboard() {
             boosterVehOnline, boosterYawOnline, boosterVehAge, boosterYawAge,
             brakeStrokeMm, brakeStrokeRaw, brakePosYaw, brakePosYawMm, brakeStatus,
             brakeSentinel, brakePressOk, brakePressFront, brakePressRear,
+            brakeTrend,
             canFrames, canHealth,
           }} />
         )}

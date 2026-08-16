@@ -54,6 +54,7 @@ import re
 import subprocess
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 from typing import Optional
@@ -292,12 +293,63 @@ BRAKE_POS_OFFSET = -4.072
 #   0x49  X/Y/Z accel + P3 floating ref    -> full; the ref is load-bearing
 #         (the disconnected-axis check compares against it — do not steal it)
 # Two sensors therefore need a THIRD ADS1115 at 0x4A (ADDR strapped to SDA).
-# When the parts arrive: set INSTALLED True and fill in the transfer function
-# from the sensor datasheet (typically 0.5–4.5 V ratiometric).
+# The transducers are here and their scale is filled in below; INSTALLED
+# stays False until that third ADC is actually wired and the dividers are
+# built. Flipping it early costs nothing (init fails soft and the circuits
+# report as not fitted), but it should still be a decision someone makes
+# looking at the hardware, not a flag that drifted true.
 BRAKE_PRESS_INSTALLED = False
 BRAKE_PRESS_I2C_ADDR  = 0x4A
 BRAKE_PRESS_CH_FRONT  = 0
 BRAKE_PRESS_CH_REAR   = 1
+BRAKE_PRESS_CH_REF    = 2      # the 5 V sensor supply, through a divider
+                               # identical to the two signal dividers
+
+# Transfer function for the FUSCH 1600 PSI transducer (bought 2026-08-08,
+# 1/8"-27 NPT, 316 stainless): 0.5-4.5 V linear across 0-1600 PSI on a 5 V
+# supply. Span and endpoints below are that part's published numbers, not
+# placeholders — but they have not been checked against a reference gauge,
+# so they are a starting scale, not a calibration.
+#
+# These sensors are ratiometric: they output 0.5-4.5 V across 0-span, and
+# that output scales with their own 5 V supply. Two consequences, both of
+# which this block exists to handle.
+#
+# First, 4.5 V cannot go into an ADS1115 running on 3.3 V — its inputs are
+# limited to VDD+0.3 V. So every signal passes through a 2:1 divider, and
+# the ADC sees 0.25-2.25 V. (Powering that ADS at 5 V instead would put its
+# I2C high threshold at 0.7*VDD = 3.5 V, which the Pi's 3.3 V bus cannot
+# reliably clear. Divide the signal, not the logic.)
+#
+# Second, the divider ratio cancels out of the maths below, because the
+# reference on P2 is divided by the same network. What does NOT cancel is a
+# sagging 5 V rail — and that is the entire reason P2 is wired. Comparing
+# signal against supply makes the reading a true ratio, so rail droop under
+# load stops showing up as a pressure change.
+BRAKE_PRESS_FULL_PSI  = 1600.0   # FUSCH span, 0-1600 PSI
+BRAKE_PRESS_R_MIN     = 0.10     # signal/supply ratio at 0 psi   (0.5/5.0)
+BRAKE_PRESS_R_MAX     = 0.90     # signal/supply ratio at span    (4.5/5.0)
+BRAKE_PRESS_REF_MIN_V = 1.0      # divided 5 V rail sits ~2.5 V; below this
+                                 # the supply is gone and there is no
+                                 # reading to be had — which is NOT 0 psi
+BRAKE_PRESS_ADS_GAIN  = 1        # +/-4.096 V; divided signal peaks ~2.25 V
+
+# --- Brake trend ring buffer ---------------------------------------
+# Feeds the scope on the BRAKE screen, and is the buffer a CSV datalogger
+# will hang off later. Sampled on its own thread, NOT in tick(): the control
+# loop runs at 10 Hz, which is fine for a number on a tile and far too slow
+# for the shape of a stop. A panic-stop pressure rise is tens of
+# milliseconds and ABS modulation is 10-15 Hz — 10 Hz turns both into noise
+# and would make the trace confidently wrong about how fast pressure came up.
+#
+# 50 Hz is the compromise: fast enough to show the rise and the modulation,
+# slow enough to leave the shared I2C bus alone. The flap ADC lives on that
+# bus and blocking its loop has bitten this project before
+# (docs/ACCELEROMETER_WIRING.md section 7). Turn TREND_HZ down first if flap
+# control ever gets chattery after the sensors go in.
+TREND_HZ       = 50
+TREND_WINDOW_S = 30    # ring depth == the longest window the UI offers
+TREND_BINS     = 360   # min/max bins pushed to the dashboard
 
 # --- PID Tuning ---
 # These are starting points — tune on the car
@@ -543,6 +595,9 @@ class HVACState:
     brake_press_ok: bool = False
     brake_press_front_psi: float = 0.0
     brake_press_rear_psi: float = 0.0
+    # Min/max envelope for the BRAKE screen scope. Empty on every other
+    # screen — see tick(); it is ~2000 numbers and nothing else draws it.
+    brake_trend: dict = field(default_factory=dict)
 
     # ── Steering (Prius EPS) — FRAMEWORK, NOTHING DECODED ────────
     # steer_decoded stays False until a signal is actually confirmed on this
@@ -663,10 +718,15 @@ class HardwareManager:
         self._accel_cache = None
         self._accel_channels = {}
 
+        # Third ADS1115 (0x4A) — one channel per hydraulic circuit plus the
+        # divided supply reference. Empty until BRAKE_PRESS_INSTALLED.
+        self._brake_press_channels = {}
+
         if not SIMULATE:
             self._init_gpio()
             self._init_ads()
             self._init_accel()
+            self._init_brake_press()
             self._init_temps()
             threading.Thread(target=self._temp_reader_loop, daemon=True,
                              name="ds18b20-reader").start()
@@ -744,6 +804,63 @@ class HardwareManager:
             self._accel_channels = {}
             log.warning("Accelerometer not present at 0x%02X (%s) — G-meter "
                         "will stay in fallback", ACCEL_I2C_ADDR, e)
+
+    def _init_brake_press(self):
+        """Third ADS1115 at 0x4A reading both brake circuits.
+
+        Gated on BRAKE_PRESS_INSTALLED, which is the point: the transducers
+        are on order, and a BRAKE screen that draws a confident 0 psi for a
+        hydraulic circuit is worse than one that says nothing at all. Same
+        rule the STEER screen follows.
+        """
+        if not BRAKE_PRESS_INSTALLED:
+            return
+        try:
+            i2c = busio.I2C(board.SCL, board.SDA)
+            ads = ADS.ADS1115(i2c, address=BRAKE_PRESS_I2C_ADDR)
+            ads.gain = BRAKE_PRESS_ADS_GAIN
+            # Default is 128 SPS. The trend thread asks for three
+            # conversions every 20 ms, and at 128 SPS three single-shot
+            # reads take ~23 ms — the sampler would set its own rate by
+            # accident and it would not be the one TREND_HZ says.
+            ads.data_rate = 860
+            self._brake_press_channels = {
+                "front": AnalogIn(ads, BRAKE_PRESS_CH_FRONT),
+                "rear":  AnalogIn(ads, BRAKE_PRESS_CH_REAR),
+                "ref":   AnalogIn(ads, BRAKE_PRESS_CH_REF),
+            }
+            log.info("Brake pressure ADS1115 initialized at 0x%02X",
+                     BRAKE_PRESS_I2C_ADDR)
+        except Exception as e:
+            self._brake_press_channels = {}
+            log.warning("Brake pressure ADC not present at 0x%02X (%s) — "
+                        "circuits will report as not fitted",
+                        BRAKE_PRESS_I2C_ADDR, e)
+
+    def read_brake_pressure(self):
+        """{"front": psi, "rear": psi}, or None when there is no reading.
+
+        None covers both "not fitted" and "supply collapsed", and both must
+        stay distinct from 0 psi — zero is a real, meaningful brake reading.
+        """
+        if not self._brake_press_channels:
+            return None
+        try:
+            ch = self._brake_press_channels
+            ref = ch["ref"].voltage
+            if ref < BRAKE_PRESS_REF_MIN_V:
+                return None
+            span = BRAKE_PRESS_R_MAX - BRAKE_PRESS_R_MIN
+
+            def psi(v):
+                r = (v / ref - BRAKE_PRESS_R_MIN) / span
+                return round(max(0.0, r) * BRAKE_PRESS_FULL_PSI, 1)
+
+            return {"front": psi(ch["front"].voltage),
+                    "rear":  psi(ch["rear"].voltage)}
+        except Exception as e:
+            log.debug("Brake pressure read failed: %s", e)
+            return None
 
     def _accel_reader_loop(self):
         """Daemon thread: sample the ADXL335 and cache g values.
@@ -1474,6 +1591,24 @@ class HVACController:
                 0.0, (brake["stroke_raw"] - BRAKE_STROKE_OFFSET)
                 / BRAKE_STROKE_SCALE), 2)
 
+        # ── Brake pressure + trend ────────────────────────────
+        # The tiles read the trend thread's cache instead of taking their
+        # own sample; see _brake_press_last. brake_press_ok False means
+        # "no reading" — not fitted, or the sensor supply is gone — and the
+        # UI must show that as blank, never as 0 psi.
+        press = _brake_press_last
+        self.state.brake_press_ok = press is not None
+        self.state.brake_press_front_psi = 0.0 if press is None else press["front"]
+        self.state.brake_press_rear_psi = 0.0 if press is None else press["rear"]
+
+        # Build the envelope only while the screen that draws it is up. It
+        # is ~2000 numbers on every broadcast and the other three screens
+        # have no use for them.
+        if self.state.main_screen == "brake" and not self.state.system_view:
+            self.state.brake_trend = brake_trend_envelope()
+        elif self.state.brake_trend:
+            self.state.brake_trend = {}
+
         self.state.can_frames = [
             {"bus": link[3:], "id": f"{cid:03X}", "hz": round(hz, 1),
              "dlc": dlc, "data": data.hex(" ").upper(),
@@ -1664,6 +1799,107 @@ class HVACController:
 _can_lock = threading.Lock()
 _can_stats = {}   # (bus, can_id) -> {"hz","dlc","data","prev","t"}
 _brake = {"stroke_raw": -1, "status": 0, "pos_yaw": -1, "sentinel": False}
+
+# --- Brake trend ---------------------------------------------------
+# (t, stroke_mm, front_psi, rear_psi); any of the three values may be None,
+# meaning "no reading", which the plot draws as a gap rather than a zero.
+# The buffer lives in the BACKEND on purpose. Two reasons, and the second is
+# the one that matters on the road: the dashboard only hears from us at
+# CONTROL_HZ, so a browser-side buffer could never hold anything faster than
+# 10 Hz; and a kiosk reload or a screen switch would wipe it — losing
+# exactly the stop you just did and went to look at.
+_trend_lock = threading.Lock()
+_trend = deque(maxlen=TREND_HZ * TREND_WINDOW_S)
+
+# Latest pressure sample, published by the trend thread. tick() reads THIS
+# rather than calling read_brake_pressure() again, so the tiles and the
+# trace are the same measurement and cannot disagree on screen — and the
+# I2C bus sees one set of conversions, not two.
+_brake_press_last = None
+
+
+def brake_trend_loop():
+    """Daemon thread: join pedal stroke (CAN) and line pressure (I2C) onto
+    ONE time base at TREND_HZ.
+
+    Sampling the two separately and lining them up afterwards is the thing
+    worth avoiding here. Stroke against pressure is the whole reason to
+    instrument the circuits — booster gain, pushrod deadband, whether
+    hydraulics track travel — and two channels carrying independent jitter
+    cannot answer a question about the delay between them.
+    """
+    global _brake_press_last
+    period = 1.0 / TREND_HZ
+    nxt = time.monotonic()
+    while True:
+        try:
+            with _can_lock:
+                raw, sentinel = _brake["stroke_raw"], _brake["sentinel"]
+            # Same rule tick() follows: the sentinel is fault signalling,
+            # not travel. Converting it would put a fake full-travel spike
+            # in the trace at the exact moment the booster faulted.
+            mm = (None if raw < 0 or sentinel else
+                  max(0.0, (raw - BRAKE_STROKE_OFFSET) / BRAKE_STROKE_SCALE))
+            p = hw.read_brake_pressure()
+            _brake_press_last = p
+            with _trend_lock:
+                _trend.append((time.monotonic(), mm,
+                               None if p is None else p["front"],
+                               None if p is None else p["rear"]))
+        except Exception as e:
+            log.debug("Brake trend sample failed: %s", e)
+
+        # Fixed schedule, not sleep(period): the I2C reads take real time
+        # and letting them add to the interval would make the trace's time
+        # axis quietly wrong. If we fall a whole period behind, resync
+        # rather than spinning to catch up.
+        nxt += period
+        now = time.monotonic()
+        if nxt < now - period:
+            nxt = now
+        time.sleep(max(0.0, nxt - now))
+
+
+def brake_trend_envelope():
+    """Downsample the ring to TREND_BINS min/max bins for the dashboard.
+
+    Min/max per bin rather than a point sample, and that is not a detail. At
+    360 bins across 30 s each bin is 83 ms — a decimated point sample would
+    step straight over a pressure spike shorter than that and draw a clean
+    line where the interesting thing happened. An envelope cannot hide one:
+    the peak IS the top of the band.
+    """
+    now = time.monotonic()
+    t0 = now - TREND_WINDOW_S
+    span = TREND_WINDOW_S / TREND_BINS
+    acc = [[[None, None] for _ in range(TREND_BINS)] for _ in range(3)]
+
+    with _trend_lock:
+        snap = list(_trend)
+
+    for (t, mm, pf, pr) in snap:
+        b = int((t - t0) / span)
+        if b < 0 or b >= TREND_BINS:
+            continue
+        for ci, v in enumerate((mm, pf, pr)):
+            if v is None:
+                continue
+            cell = acc[ci][b]
+            cell[0] = v if cell[0] is None else min(cell[0], v)
+            cell[1] = v if cell[1] is None else max(cell[1], v)
+
+    def flat(ci, i):
+        return [None if c[i] is None else round(c[i], 2) for c in acc[ci]]
+
+    return {
+        "win_s": TREND_WINDOW_S,
+        "bins": TREND_BINS,
+        "hz": TREND_HZ,
+        "press_full": BRAKE_PRESS_FULL_PSI,
+        "mm_lo": flat(0, 0), "mm_hi": flat(0, 1),
+        "pf_lo": flat(1, 0), "pf_hi": flat(1, 1),
+        "pr_lo": flat(2, 0), "pr_hi": flat(2, 1),
+    }
 
 _CAN_SFF_MASK = 0x000007FF
 _CAN_EFF_FLAG = 0x80000000
@@ -2219,6 +2455,10 @@ async def startup():
                          name=f"can-{_link}-reader").start()
     threading.Thread(target=can_health_loop, daemon=True,
                      name="can-health").start()
+    # Started unconditionally, like the CAN readers it draws from: stroke
+    # alone is a useful trace long before the pressure transducers arrive.
+    threading.Thread(target=brake_trend_loop, daemon=True,
+                     name="brake-trend").start()
     threading.Thread(target=lighting_reader_loop, daemon=True,
                      name="lighting-reader").start()
     threading.Thread(target=tsdash_reader_loop, daemon=True,
