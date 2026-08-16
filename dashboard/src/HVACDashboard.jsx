@@ -692,10 +692,14 @@ function BrakeTrend({ trend, pressOk, live, win, setWin }) {
         {pressOk && <Trace band={prBand} mid={prMid} col={C.green} />}
         <Trace band={mmBand} mid={mmMid} col={C.vfd} />
 
-        {bins === 0 && (
+        {/* An empty ring is the sampler thread being down, NOT a parked
+            car — a parked car still fills the ring with nulls and gets a
+            drawn-but-empty grid, which is the honest picture. */}
+        {!trend.n && (
           <text x={TREND_W / 2} y={TREND_H / 2} fill={C.dim} fontSize={20}
             fontFamily="'Rajdhani',sans-serif" textAnchor="middle">
-            waiting for the first samples</text>
+            {bins === 0 ? "waiting for the first samples"
+                        : "sampler not running"}</text>
         )}
       </svg>
     </>

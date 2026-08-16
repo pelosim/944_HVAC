@@ -1895,6 +1895,11 @@ def brake_trend_envelope():
         "win_s": TREND_WINDOW_S,
         "bins": TREND_BINS,
         "hz": TREND_HZ,
+        # Ring fill. Separates "sampler is running, nothing is happening"
+        # from "sampler is dead" — with the car parked every channel is
+        # legitimately None, so without this the two draw the same empty
+        # grid and the screen cannot tell you which one you are looking at.
+        "n": len(snap),
         "press_full": BRAKE_PRESS_FULL_PSI,
         "mm_lo": flat(0, 0), "mm_hi": flat(0, 1),
         "pf_lo": flat(1, 0), "pf_hi": flat(1, 1),
